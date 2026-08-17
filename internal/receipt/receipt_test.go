@@ -96,6 +96,29 @@ func TestINV007_RefutationDominatesVerification(t *testing.T) {
 	}
 }
 
+// TestT0PassConfersNoVerification: a probe result that ran and passed but
+// confers only T0 raises nothing — T0 IS the unverified tier, so accepting
+// such a pass would mint a verified row whose effective tier means "nothing
+// checked this". The claim stays in the remainder, and the pass does not
+// dilute an honest refutation either.
+func TestT0PassConfersNoVerification(t *testing.T) {
+	claims := []schema.Claim{{ID: "Z1", Shape: schema.ShapeInvariant,
+		ProbeIDs: []string{"noop:x"}}}
+	evidence := [][]schema.Evidence{{
+		{ClaimID: "Z1", ProbeID: "noop:x", Tier: schema.T0Unverified, Ran: true, Passed: true},
+	}}
+	r := Assemble(gitdiff.Change{}, claims, evidence, schema.Coverage{})
+	if r.Results[0].Status != schema.StatusUnverified {
+		t.Fatalf("status = %q, want unverified (a T0 pass confers nothing)", r.Results[0].Status)
+	}
+	if len(r.Remainder) != 1 || r.Remainder[0].Claim.ID != "Z1" {
+		t.Fatalf("claim with only a T0 pass must land in the remainder")
+	}
+	if r.Summary.Verified != 0 {
+		t.Fatalf("summary.Verified = %d, want 0", r.Summary.Verified)
+	}
+}
+
 // TestRemainderSectionAlwaysRenders: the text receipt states the remainder even
 // when it is empty, so its absence is a declared result, not an omission.
 func TestRemainderSectionAlwaysRenders(t *testing.T) {
