@@ -114,7 +114,7 @@ func TestAnchorClaims(t *testing.T) {
 		{ID: "INV-777", Shape: schema.ShapeInvariant, Text: "INV-777 (referenced; no bound probe from harvest)"},
 		{ID: "MUST:docs/wire-rfc.md:1", Shape: schema.ShapeMustClause, Text: "The relay MUST forward frames in order."},
 	}
-	AnchorClaims(claims, idx, nil)
+	claims, _ = AnchorClaims(claims, idx, nil)
 
 	resolved := claims[0]
 	if resolved.Anchor == nil || resolved.Anchor.Status != schema.AnchorResolved {
@@ -148,14 +148,32 @@ func TestAnchorClaims(t *testing.T) {
 	}
 }
 
-// TestAnchorClaimsNoCorpus: a repo with no definition corpus gets no anchor
-// annotations at all — a repo that never states invariants in documents
-// should not have every claim flagged for it.
+// TestAnchorClaimsNoCorpus: a repo with no definition corpus at all is not
+// practicing the spec-id convention, so a probe-less spec-id reference there
+// is a MENTION with no possible referent — suppressed and counted, never
+// minted as a remainder row. Probed spec-id claims (a test binds the id) and
+// non-spec claims pass through, and nothing gets an anchor annotation.
 func TestAnchorClaimsNoCorpus(t *testing.T) {
-	claims := []schema.Claim{{ID: "INV-001", Shape: schema.ShapeInvariant, Text: "t"}}
-	AnchorClaims(claims, DefIndex{}, nil)
-	if claims[0].Anchor != nil {
-		t.Errorf("anchor = %+v, want nil when the corpus is empty", claims[0].Anchor)
+	claims := []schema.Claim{
+		{ID: "INV-001", Shape: schema.ShapeInvariant, Text: "t",
+			Source: schema.Source{Kind: schema.SourceSpecID, File: "a.go", Line: 3}},
+		{ID: "INV-002", Shape: schema.ShapeInvariant, Text: "tested",
+			Source:   schema.Source{Kind: schema.SourceSpecID, File: "a.go", Line: 9},
+			ProbeIDs: []string{"go-test:x:TestINV002"}},
+		{ID: "MUST:doc.md:1", Shape: schema.ShapeMustClause, Text: "The tool MUST run.",
+			Source: schema.Source{Kind: schema.SourceRFCMust, File: "doc.md", Line: 1}},
+	}
+	kept, suppressed := AnchorClaims(claims, DefIndex{}, nil)
+	if suppressed != 1 {
+		t.Fatalf("suppressed = %d, want 1 (the probe-less reference)", suppressed)
+	}
+	if len(kept) != 2 || kept[0].ID != "INV-002" || kept[1].ID != "MUST:doc.md:1" {
+		t.Fatalf("kept = %+v, want the probed spec-id claim and the MUST clause", kept)
+	}
+	for _, c := range kept {
+		if c.Anchor != nil {
+			t.Errorf("anchor = %+v, want nil when the corpus is empty", c.Anchor)
+		}
 	}
 }
 
@@ -187,7 +205,7 @@ func TestAnchorSubVariantFallsBackToParent(t *testing.T) {
 		{ID: "INV-020a", Shape: schema.ShapeInvariant, Text: "orig-20a"},
 		{ID: "INV-099z", Shape: schema.ShapeInvariant, Text: "orig-99z"},
 	}
-	AnchorClaims(claims, idx, nil)
+	claims, _ = AnchorClaims(claims, idx, nil)
 
 	if a := claims[0].Anchor; a == nil || a.Status != schema.AnchorAmbiguous || len(a.Sites) != 2 {
 		t.Errorf("INV-013d anchor = %+v, want ambiguous via parent's two colliding sites", claims[0].Anchor)
@@ -233,7 +251,7 @@ func TestAnchorChangeScopedDisambiguation(t *testing.T) {
 	}
 
 	unscoped := fresh()
-	AnchorClaims(unscoped, idx, nil)
+	unscoped, _ = AnchorClaims(unscoped, idx, nil)
 	for _, c := range unscoped {
 		if c.Anchor == nil || c.Anchor.Status != schema.AnchorAmbiguous {
 			t.Errorf("%s without change scope = %+v, want ambiguous", c.ID, c.Anchor)
@@ -241,7 +259,7 @@ func TestAnchorChangeScopedDisambiguation(t *testing.T) {
 	}
 
 	scoped := fresh()
-	AnchorClaims(scoped, idx, []string{"specs/loader.md", "gate/loader_test.go"})
+	scoped, _ = AnchorClaims(scoped, idx, []string{"specs/loader.md", "gate/loader_test.go"})
 	own := scoped[0]
 	if own.Anchor == nil || own.Anchor.Status != schema.AnchorResolved ||
 		own.Text != "INV-004: Config check is routed through the loader" ||

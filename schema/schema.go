@@ -287,6 +287,14 @@ type Coverage struct {
 	Claimed int            `json:"claimed"` // files sourcing ≥1 claim
 	Scanned int            `json:"scanned"` // read by ≥1 harvester, 0 claims
 	Unread  int            `json:"unread"`  // no harvester read the file
+	// SuppressedMentions counts spec-id sightings that were NOT minted as
+	// claims because the repo defines no spec-id corpus at all: with no
+	// definition anywhere, a reference has no possible referent — it is a
+	// MENTION of an identifier, not a claim about a defined invariant. The
+	// suppression is disclosed here because dropping entries from the
+	// remainder silently would be exactly the dishonesty the remainder
+	// exists to prevent.
+	SuppressedMentions int `json:"suppressed_mentions,omitempty"`
 }
 
 // Receipt is the per-change output: what was claimed, what was verified, and —
@@ -304,4 +312,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.4"
+const SchemaVersion = "0.0.5"
