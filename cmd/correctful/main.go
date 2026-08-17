@@ -31,6 +31,7 @@ import (
 
 	"github.com/joshft/correctful/internal/gitdiff"
 	"github.com/joshft/correctful/internal/harvest"
+	"github.com/joshft/correctful/internal/llmextract"
 	"github.com/joshft/correctful/internal/probe"
 	"github.com/joshft/correctful/internal/receipt"
 )
@@ -42,18 +43,19 @@ func main() {
 	asJSON := flag.Bool("json", false, "deprecated alias for -format json")
 	concurrency := flag.Int("concurrency", 4, "max probes to run at once")
 	timeout := flag.Duration("timeout", 5*time.Minute, "overall probe budget")
+	useLLM := flag.Bool("llm", false, "additionally PROPOSE claims from the diff with an LLM (needs ANTHROPIC_API_KEY; proposals are unverified and land in the remainder)")
 	flag.Parse()
 
 	if *asJSON {
 		*format = "json"
 	}
-	if err := run(*base, *repo, *format, *concurrency, *timeout); err != nil {
+	if err := run(*base, *repo, *format, *concurrency, *timeout, *useLLM); err != nil {
 		fmt.Fprintln(os.Stderr, "correctful:", err)
 		os.Exit(2)
 	}
 }
 
-func run(base, repo, format string, concurrency int, timeout time.Duration) error {
+func run(base, repo, format string, concurrency int, timeout time.Duration, useLLM bool) error {
 	switch format {
 	case "text", "json", "md":
 	default:
@@ -90,7 +92,22 @@ func run(base, repo, format string, concurrency int, timeout time.Duration) erro
 	}
 
 	// Harvest claims, then dispatch probes against them.
-	claims, coverage, err := harvest.Run(root, change.Files, harvest.Default()...)
+	harvesters := harvest.Default()
+	if useLLM {
+		if base == "" {
+			return fmt.Errorf("-llm needs a per-change receipt: pass -base (the extractor reads the diff, and a sweep has none)")
+		}
+		client, err := llmextract.NewClient()
+		if err != nil {
+			return err
+		}
+		patch, err := gitdiff.Patch(ctx, root, base)
+		if err != nil {
+			return fmt.Errorf("reading diff for llm extraction: %w", err)
+		}
+		harvesters = append(harvesters, llmextract.Harvester{Patch: patch, Client: client})
+	}
+	claims, coverage, err := harvest.Run(root, change.Files, harvesters...)
 	if err != nil {
 		return fmt.Errorf("harvesting claims: %w", err)
 	}

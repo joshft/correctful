@@ -197,3 +197,27 @@ func TestAnchoringSummaryAndMarkers(t *testing.T) {
 		t.Errorf("text receipt renders anchoring line without a corpus:\n%s", t2.String())
 	}
 }
+
+// TestLLMProposedMarker: an LLM-proposed claim is marked wherever it renders
+// — a reader must never mistake a model's proposal for something the change
+// wrote down.
+func TestLLMProposedMarker(t *testing.T) {
+	claims := []schema.Claim{{
+		ID: "LLM:pkg/gate.go:1", Shape: schema.ShapeInvariant,
+		Text:   "The gate rejects nil input.",
+		Source: schema.Source{Kind: schema.SourceLLM, File: "pkg/gate.go"},
+	}}
+	r := Assemble(gitdiff.Change{BaseRef: "a", HeadRef: "b"}, claims,
+		[][]schema.Evidence{nil}, schema.Coverage{})
+	if r.Summary.Unverified != 1 {
+		t.Fatalf("summary = %+v, want the proposal in the remainder", r.Summary)
+	}
+	var text, md strings.Builder
+	WriteText(&text, r)
+	WriteMarkdown(&md, r)
+	for name, out := range map[string]string{"text": text.String(), "markdown": md.String()} {
+		if !strings.Contains(out, "[llm-proposed]") {
+			t.Errorf("%s receipt missing the llm-proposed marker:\n%s", name, out)
+		}
+	}
+}

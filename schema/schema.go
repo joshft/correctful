@@ -90,6 +90,13 @@ const (
 	SourceAlloyRun    SourceKind = "alloy-run"    // an Alloy `run` command (witness)
 	SourceRFCMust     SourceKind = "rfc-must"     // a MUST/MUST-NOT clause in an RFC
 	SourceSpecDef     SourceKind = "spec-def"     // a definition heading in the spec corpus
+	// SourceLLM marks a claim PROPOSED by a language model reading the diff.
+	// Such claims are unverified by construction: an LLM may propose, only a
+	// machine may raise a claim above T0 (the cardinal rule). They exist so
+	// the remainder can be honest on changes that never wrote their claims
+	// down — the receipt states what the change implicitly asserts and that
+	// nothing checked it.
+	SourceLLM SourceKind = "llm-proposed"
 )
 
 // Source is the provenance of a harvested claim — the evidence trail back to the
@@ -287,4 +294,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.3"
+const SchemaVersion = "0.0.4"

@@ -194,6 +194,38 @@ Later increments (each gated on beating the one before it): structural extractor
 asserts, RFC MUST clauses, mutation, fuzzing, concolic execution, Dafny proof,
 and runtime observation.
 
+## The LLM extractor (v0.7, opt-in)
+
+Everything above harvests claims somebody WROTE — test names, spec ids, Alloy
+asserts, MUST clauses. The wild case is a diff where nobody wrote any of that,
+and there the harvest path is honest but empty. `-llm` adds the extraction
+rung for that case: a language model reads the DIFF (never the repository) and
+proposes the claims the change makes implicitly.
+
+The cardinal rule is structural here, not aspirational: **proposals carry no
+probes**, land in the remainder at T0, and are marked `[llm-proposed]` in
+every rendering — nothing the model says can raise a tier or produce a false
+pass. The worst a hallucinated claim can do is waste a remainder row. What the
+extractor buys is an honest remainder for changes that never stated their
+claims: "this change implicitly asserts X, Y, Z — none of it checked."
+
+Discipline: pinned model (`claude-sonnet-5`; `CORRECTFUL_LLM_MODEL`
+overrides), temperature 0, a strict JSON output contract that fails loudly on
+prose-wrapped output, and proposals rejected — never repaired — when they
+name a file outside the diff or a shape outside the taxonomy. The diff is
+capped at 150KB with truncation disclosed through coverage: only files whose
+hunks were actually sent count as read by the `llm` harvester. Requires
+`ANTHROPIC_API_KEY`; without the flag, behavior is byte-identical to the
+mechanical path, so the CI gate never depends on a model.
+
+```sh
+ANTHROPIC_API_KEY=... correctful -base auto -llm
+```
+
+Verifying LLM proposals (binding them to probes) is a later increment, gated
+like every extractor before it: kept only if it raises verification without a
+false bind.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its
@@ -259,6 +291,7 @@ than smoothed over:
 schema/                 the payload — Claim, Probe, Evidence, Tier, Receipt
 internal/gitdiff/       resolve the change (diff vs base, or whole tree)
 internal/harvest/       diff → claims (test names, spec ids, Alloy, RFC MUSTs)
+internal/llmextract/    diff → PROPOSED claims (opt-in -llm; remainder-only)
 internal/probe/         claims → evidence (dispatcher + go-test runner)
 internal/receipt/       assemble + render (JSON payload, text for humans)
 cmd/correctful/         the CLI

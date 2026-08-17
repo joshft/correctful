@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,44 @@ func TestTrackedByPattern(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "spec.md" {
 		t.Fatalf("TrackedByPattern = %v, want [spec.md]", got)
+	}
+}
+
+// TestPatchCarriesCommittedAndUncommittedHunks: the patch matches Resolve's
+// change semantics — the committed diff since the base plus working-tree
+// edits — so the LLM extractor reads exactly the change the receipt is about.
+func TestPatchCarriesCommittedAndUncommittedHunks(t *testing.T) {
+	dir := initRepo(t, "main")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "a.go")
+	git("commit", "-q", "-m", "base file")
+	git("checkout", "-q", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n\nfunc Committed() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("commit", "-q", "-am", "committed change")
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package a\n\nfunc Uncommitted() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "b.go") // staged but uncommitted
+
+	patch, err := Patch(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"+func Committed() {}", "+func Uncommitted() {}"} {
+		if !strings.Contains(patch, want) {
+			t.Errorf("patch missing %q:\n%s", want, patch)
+		}
 	}
 }

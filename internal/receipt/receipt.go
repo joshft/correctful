@@ -116,6 +116,15 @@ func bindingNote(res schema.ClaimResult) string {
 	return ""
 }
 
+// llmNote marks an LLM-proposed claim wherever it renders: a reader must
+// never mistake a model's proposal for something the change wrote down.
+func llmNote(c schema.Claim) string {
+	if c.Source.Kind == schema.SourceLLM {
+		return "  [llm-proposed]"
+	}
+	return ""
+}
+
 // anchorNote renders a claim's anchor state as a row suffix. Resolved claims
 // need no marker — their upgraded text IS the definition. The marker calls
 // out the two states a reader should distrust: an id nothing defines, and an
@@ -227,8 +236,8 @@ func WriteText(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "  (empty — every harvested claim reached a probe)")
 	}
 	for _, res := range r.Remainder {
-		fmt.Fprintf(w, "  %s — %s  [%s:%d]%s\n", res.Claim.ID, res.Claim.Text,
-			res.Claim.Source.File, res.Claim.Source.Line, anchorNote(res.Claim))
+		fmt.Fprintf(w, "  %s — %s  [%s:%d]%s%s\n", res.Claim.ID, res.Claim.Text,
+			res.Claim.Source.File, res.Claim.Source.Line, anchorNote(res.Claim), llmNote(res.Claim))
 	}
 
 	writeCoverage(w, r.Coverage)

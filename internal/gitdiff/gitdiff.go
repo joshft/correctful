@@ -110,6 +110,19 @@ func ResolveAll(ctx context.Context, dir string) (Change, error) {
 	}, nil
 }
 
+// Patch returns the unified diff text of the change Resolve describes: the
+// committed diff since the merge base (three-dot, matching Resolve's file
+// set), followed by any not-yet-committed changes. This is the substrate the
+// LLM extractor reads — the change itself, not the repository.
+func Patch(ctx context.Context, dir, baseRef string) (string, error) {
+	committed, err := run(ctx, dir, "diff", baseRef+"...HEAD")
+	if err != nil {
+		return "", err
+	}
+	uncommitted, _ := run(ctx, dir, "diff", "HEAD")
+	return committed + uncommitted, nil
+}
+
 // TrackedByPattern lists tracked files matching the given pathspec patterns
 // (e.g. "*.md"), repo-relative. Tracked only, deliberately: the definition
 // corpus a claim resolves against should be what the repo COMMITS to, not a
