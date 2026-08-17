@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -177,6 +178,31 @@ func fileBindingFor(prof covProfile, relFile string) string {
 		}
 	}
 	return schema.BindingFileNotReached
+}
+
+// scopeOf reduces a profile to the probe's measured execution footprint: the
+// number of distinct package directories holding an EXECUTED block. One
+// directory is a single-package run; more is cross-package — the axis a
+// policy floor needs to require integration-shaped evidence. A profile with
+// no executed blocks stays unmeasured rather than guessing.
+func scopeOf(prof covProfile) string {
+	dirs := map[string]bool{}
+	for f, blocks := range prof {
+		for _, b := range blocks {
+			if b.count > 0 {
+				dirs[path.Dir(f)] = true
+				break
+			}
+		}
+	}
+	switch len(dirs) {
+	case 0:
+		return ""
+	case 1:
+		return schema.ScopeSinglePackage
+	default:
+		return schema.ScopeCrossPackage
+	}
 }
 
 // profileBlocksFor finds the profile entry whose import-qualified path ends

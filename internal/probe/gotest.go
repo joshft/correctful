@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joshft/correctful/schema"
@@ -34,7 +36,8 @@ func (GoTestRunner) CanRun(probeID string) bool {
 func (GoTestRunner) MaxTier() schema.Tier { return schema.T1Assertion }
 
 func (GoTestRunner) Run(ctx context.Context, repoDir string, claim schema.Claim, probeID string) schema.Evidence {
-	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T1Assertion}
+	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T1Assertion,
+		Mechanism: schema.MechanismGoTest, Environment: goEnvironment(repoDir)}
 
 	file, name, ok := schema.ParseGoTestProbeID(probeID)
 	if !ok {
@@ -192,4 +195,32 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// goEnv caches the probe toolchain's identity for the process — one `go env`
+// exec, shared by every go probe. Receipts run against one repo per process,
+// so a per-repo toolchain directive is honored by the first caller.
+var goEnv struct {
+	once sync.Once
+	val  string
+}
+
+// goEnvironment reports the toolchain go probes run under, e.g.
+// "go1.24.5 linux/amd64" — measured from the `go` that executes the probes
+// (which a go.mod toolchain directive can pin), never assumed from the
+// checker's own build. Empty when the measurement fails: unmeasured is
+// stated as unmeasured, and the probe run itself would surface the broken
+// toolchain loudly.
+func goEnvironment(repoDir string) string {
+	goEnv.once.Do(func() {
+		cmd := exec.Command("go", "env", "GOVERSION")
+		cmd.Dir = repoDir
+		out, err := cmd.Output()
+		v := strings.TrimSpace(string(out))
+		if err != nil || v == "" {
+			return
+		}
+		goEnv.val = v + " " + runtime.GOOS + "/" + runtime.GOARCH
+	})
+	return goEnv.val
 }

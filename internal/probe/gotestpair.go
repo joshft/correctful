@@ -33,7 +33,8 @@ func (GoTestPairRunner) CanRun(probeID string) bool {
 func (GoTestPairRunner) MaxTier() schema.Tier { return schema.T2Adversarial }
 
 func (GoTestPairRunner) Run(ctx context.Context, repoDir string, claim schema.Claim, probeID string) schema.Evidence {
-	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T2Adversarial}
+	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T2Adversarial,
+		Mechanism: schema.MechanismGoTestPair, Environment: goEnvironment(repoDir)}
 
 	pkgDir, acceptName, rejectName, ok := schema.ParseGoTestPairProbeID(probeID)
 	if !ok {

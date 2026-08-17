@@ -125,6 +125,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, repoDir string, claims []sche
 					} else {
 						ev.Binding = bindingFor(repoDir, c.RefSites, p.(covProfile))
 					}
+					// Scope is a property of the RUN, identical on every
+					// edge sharing the probe's single execution.
+					ev.Scope = scopeOf(p.(covProfile))
 				}
 			}
 			out[i][j] = ev
