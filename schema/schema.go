@@ -192,10 +192,13 @@ type Evidence struct {
 	Binding string `json:"binding,omitempty"`
 }
 
-// Verified reports whether this evidence raises its claim: the probe ran and
-// passed. A probe that ran and FAILED refutes the claim; a probe that did not
-// run says nothing.
-func (e Evidence) Verified() bool { return e.Ran && e.Passed }
+// Verified reports whether this evidence raises its claim: the probe ran,
+// passed, AND confers a tier above T0. A pass at T0 confers nothing — T0 IS
+// the unverified tier, so counting such a pass as verification would mint
+// StatusVerified with an effective tier that means "nothing checked this".
+// A probe that ran and FAILED refutes the claim; a probe that did not run
+// says nothing.
+func (e Evidence) Verified() bool { return e.Ran && e.Passed && e.Tier > T0Unverified }
 
 // Refuted reports whether this evidence refutes its claim: the probe ran and
 // the claim did not hold.
@@ -207,8 +210,9 @@ type Status string
 const (
 	// StatusVerified: at least one probe ran and passed. EffectiveTier > T0.
 	StatusVerified Status = "verified"
-	// StatusRefuted: at least one probe ran and failed, and none passed at a
-	// higher tier. The merge gate should block on refuted claims.
+	// StatusRefuted: at least one probe ran and failed. Refutation dominates
+	// unconditionally — no volume or tier of passing probes outweighs a
+	// failure. The merge gate should block on refuted claims.
 	StatusRefuted Status = "refuted"
 	// StatusUnverified: nothing ran that could raise the claim. Remainder.
 	StatusUnverified Status = "unverified"

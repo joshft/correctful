@@ -193,8 +193,10 @@ func sanitizePaths(detail, repoRoot string) string {
 //     by five tests where four pass and one fails does NOT hold, and letting
 //     passing probes outvote a failing one would launder a defect into a
 //     verified row.
-//   - verified: no refutation, and some probe ran and passed; effective tier is
-//     the highest a passing probe conferred.
+//   - verified: no refutation, and some probe ran, passed, and conferred a
+//     tier above T0 (Evidence.Verified enforces the tier floor — a T0 pass
+//     raises nothing); effective tier is the highest a passing probe
+//     conferred.
 //   - unverified: nothing ran that could raise the claim. Remainder.
 func weigh(evs []schema.Evidence) (schema.Status, schema.Tier) {
 	best := schema.T0Unverified
