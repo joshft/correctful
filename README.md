@@ -2,28 +2,33 @@
 
 > Is this diff *correctful*?
 
-**correctful is a diff-level evidence checker.** It reads a change, derives
-the **claims** the change makes, runs mechanical **probes** against them, and
-emits a **receipt** — including the part every other tool hides: the
-**unverified remainder**, an explicit accounting of what nothing checked.
+**correctful is a diff-level evidence checker.** The tool reads a change and
+harvests the claims that the change makes. The tool runs mechanical probes to
+test each claim. Then the tool writes a **receipt**. The receipt includes the
+**unverified remainder**: the list of claims that no probe examined. Other
+tools hide this list. correctful shows it.
 
-CI answers "did the tests pass?". A receipt answers the question a reviewer
-actually has: **what does this change claim, which claims are backed by
-evidence, and which are backed by nothing?**
+Your CI tells you that the tests passed. The receipt tells you more:
 
-- **Refuted claims block the merge.** One failing probe outvotes any number of
-  passing ones.
-- **Verified claims carry an evidence tier** that is a property of the probe,
-  never an opinion — an LLM may *propose* claims, only a machine can verify one.
-- **The remainder is always stated**, even when empty, and the receipt
-  discloses its own blind spots: which files no harvester read, what the
-  change scope excluded.
+- The claims that the change makes.
+- The claims that have evidence, and the tier of that evidence.
+- The claims that have no evidence.
 
-MIT, open schema. The receipt JSON is the payload; the tool is its demo.
+Three rules control the receipt:
 
-## What a receipt looks like
+- **A refuted claim stops the merge.** One failed probe is stronger than many
+  passed probes.
+- **Only a machine can verify a claim.** An LLM can propose a claim. A
+  proposal cannot increase a tier.
+- **The receipt always shows the remainder**, also when the remainder is
+  empty. The receipt also shows its own blind spots: the files that no
+  harvester read, and the files that the scope excluded.
 
-The PR-comment rendering (illustrative content, real shape):
+The license is MIT. The schema is open. The receipt JSON is the payload.
+
+## The receipt
+
+This is the pull-request format. The content is an example. The shape is real.
 
 ```markdown
 ## correctful receipt
@@ -50,11 +55,14 @@ Change: `main...feature/rate-limit` (2f9c01ab34cd..77aa10becc02 · input:9e51c7d
 **Harvest coverage:** 6 files — 4 claimed · 1 scanned · 1 unread
 ```
 
-## Install
+## Installation
 
-Needs Go 1.26+ and git. Probes use the toolchains you already have — `go test`
-always; optionally the `dotnet` CLI (C# probes) and Java + the Alloy jar
-(`ALLOY_JAR`) when your repo has those.
+You need Go 1.26 or later, and git. The probes use the toolchains that you
+have:
+
+- `go test` — always available with Go.
+- The `dotnet` CLI — necessary only for the C# probes.
+- Java and the Alloy jar (`ALLOY_JAR`) — necessary only for the Alloy probes.
 
 ```sh
 go install github.com/joshft/correctful/cmd/correctful@latest
@@ -62,55 +70,60 @@ go install github.com/joshft/correctful/cmd/correctful@latest
 go build -o correctful ./cmd/correctful
 ```
 
-## Run
+## Operation
 
 ```sh
-correctful -base main               # per-change receipt: what your branch adds over main
-correctful                          # whole-tree sweep: every claim in the repo
-correctful -base main -format json  # the machine-readable payload
-correctful -base auto -format md    # CI mode: detect the base, render a PR comment
-correctful -base main -llm          # opt-in: an LLM PROPOSES extra claims (remainder-only,
-                                    # needs ANTHROPIC_API_KEY; the capped diff is sent to the API)
+correctful -base main               # make a receipt for the changes on your branch
+correctful                          # examine the full repository (the sweep)
+correctful -base main -format json  # write the receipt as JSON, for other tools
+correctful -base auto -format md    # CI mode: find the base, write a PR comment
+correctful -base main -llm          # also let an LLM propose claims (see the note)
 ```
 
-Exit `0`: nothing refuted. Exit `1`: a probe ran and a claim did not hold —
-merge-gate semantics. **The remainder never fails a run** — it is an honest
-report, not a defect.
+The exit code is `0` when no probe refuted a claim. The exit code is `1` when
+a probe refuted a claim. **The remainder does not change the exit code.** The
+remainder is a report, not a defect.
 
-## Use it as a merge gate
+Note: The `-llm` option sends the capped diff — your source changes — to the
+Anthropic API. The option needs `ANTHROPIC_API_KEY`. Without the option, no
+data goes out from your machine. LLM proposals stay in the remainder at T0.
 
-[`.github/workflows/correctful.yml`](.github/workflows/correctful.yml) is the
-reference wiring: one execution per pull request, the receipt posted as a
-self-updating PR comment (found again by its `<!-- correctful-receipt -->`
-marker), a copy in the job summary, and the gate failing only on refuted
-claims. This repository develops through that gate — every PR here carries
-its own receipt.
+## The merge gate
 
-## What it checks today
+The file [`.github/workflows/correctful.yml`](.github/workflows/correctful.yml)
+shows the reference configuration:
 
-| You write | correctful derives | Probed by | Tier on pass |
+- The workflow makes one receipt for each pull request.
+- The workflow writes the receipt as a comment on the pull request. The
+  marker `<!-- correctful-receipt -->` identifies the comment. The workflow
+  updates the same comment after each push.
+- The gate fails only when a probe refuted a claim.
+
+This repository uses this gate for each of its own pull requests.
+
+## What correctful examines
+
+| You write | correctful harvests | The probe | Tier |
 |---|---|---|---|
-| a Go test named for an invariant (`TestINV009_…`) | an invariant claim bound to that test | `go test -json` event stream — never the exit code | T1 |
-| an accept/reject test pair | one compound adversarial claim | one `go test -json` run; both sides must pass | T2 |
-| a C# xUnit class named for invariants | a claim per id, a probe per `[Fact]`/`[Theory]` | `dotnet test --filter`, verdict from summary counts | T1 |
-| an Alloy `assert` with a `check` | a safety claim | the Alloy CLI's own result artifact | T3 |
-| an Alloy `run` | a consistency witness (inverted pass — the vacuity guard) | the Alloy CLI | T3 |
-| spec ids in shipped code (`INV-…`, `AP-…`, …) | a referenced-invariant claim, anchored to its spec definition, coverage-proven where possible | reconciles with id-named tests | — |
-| MUST clauses in a normative doc | a must-clause claim | nothing yet — the honest remainder | T0 |
-| nothing at all (`-llm`) | LLM-*proposed* claims, marked `[llm-proposed]` | nothing, structurally — a model cannot raise a tier | T0 |
+| a Go test with an invariant name (`TestINV009_…`) | an invariant claim, attached to that test | `go test -json` events, not the exit code | T1 |
+| an accept test and a reject test, as a pair | one adversarial claim | one `go test -json` run; the two tests must pass | T2 |
+| a C# xUnit class with invariant names | a claim for each id, a probe for each `[Fact]` | `dotnet test --filter`, verdict from the counts | T1 |
+| an Alloy `assert` with a `check` | a safety claim | the Alloy result file | T3 |
+| an Alloy `run` | a witness claim (a pass shows that the model is consistent) | the Alloy result file | T3 |
+| spec ids in shipped code (`INV-…`, `AP-…`, …) | a reference claim, anchored to its definition | id-named tests, with coverage proof | — |
+| MUST clauses in a normative document | a must-clause claim | no probe is available — the claim stays in the remainder | T0 |
+| nothing (`-llm`) | LLM proposals, with the mark `[llm-proposed]` | no probe, by design | T0 |
 
-Evidence tiers: **T0** unverified · **T1** one assertion held · **T2** an
-accept/reject pair held · **T3** property / model-check · **T4** proof /
-exhaustive / observed.
+The tiers: **T0** unverified · **T1** one assertion held · **T2** an
+accept/reject pair held · **T3** property or model check · **T4** proof,
+exhaustive check, or observation.
 
-## Design, measurements, limitations
+## The design and the measurements
 
-Every extractor and probe above was measured on real repositories before it
-shipped, and the misses are documented as prominently as the hits — including
-the LLM extractor's blinded precision/recall numbers and the increments that
-were measured and *rejected*. The full story — the four load-bearing rules,
-harvester rationale, proof-carrying binding, receipt sanitization, and known
-limitations — is in **[DESIGN.md](DESIGN.md)**.
+We measured each extractor and each probe on real repositories before
+release. [DESIGN.md](DESIGN.md) contains the full design rationale, the
+measured numbers, and the known limitations. The document shows the failures
+and the successes.
 
 ## License
 
