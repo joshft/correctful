@@ -336,6 +336,70 @@ Live A/B on a real workflow-touching change: pre-fix the workflow claim was
 structurally unreachable; post-fix the model minted it from the workflow
 section itself, exact to the step name and setting.
 
+## The end state (adopted 2026-08, refined by external review)
+
+The definition the project builds toward:
+
+> A receipt is an authenticated record of claims, evidence, scope, and
+> unverified remainder for one exact change.
+
+And the operating principle it exists to enable:
+
+> correctful makes each change carry its evidence and its unverified
+> remainder. Human review effort then follows unresolved claims, not agent
+> output.
+
+The context is agentic engineering: generation is no longer the bottleneck,
+verification is. An agent can produce fifty changes a day; a human cannot
+read fifty diffs, but a human can read fifty remainders. The same boundary
+serves orchestration — an agent must never accept another agent's report
+about its own success, only a receipt from a trusted execution context.
+
+The product structure this implies:
+
+- Agents and humans propose claims.
+- Trusted harvesters find additional claims.
+- Probe suppliers produce mechanical evidence.
+- correctful validates bindings and verdicts.
+- Repository policy evaluates the receipt.
+- Agents use receipts as work contracts.
+- Humans review refutations, remainders, and exceptions.
+- Receipts link across changes through stable identities and digests.
+
+The boundary: **correctful validates, binds, combines, and applies policy.
+It does not become every probe runner.** The shared schema is worth more
+than a large built-in probe set — external tools supply evidence through
+the schema (with provenance, once the evidence-intake contract exists), and
+the in-tree runners are the demonstration, not the product.
+
+Five commitments, each a correction the external review made to a weaker
+draft of this section:
+
+1. **The receipt decides when diff review is necessary; it never fully
+   replaces it.** High-risk remainders, weak bindings, and unexpected
+   claims trigger source review. Verified rows need little routine
+   attention — but policy, harvester behavior, and probe definitions are
+   the trust base, and changes touching them always warrant human eyes.
+2. **Tier floors need evidence classes.** A single scalar tier cannot
+   express relevance, binding precision, execution scope, or environment.
+   Policy requires a minimum tier AND a probe type ("authentication code
+   requires a T2 adversarial pair and an integration probe").
+3. **An input digest alone is not a chain.** A receipt chain also needs the
+   parent receipt digest, base and head identities, the policy digest,
+   harvester and probe versions, and stable repository claim identities.
+   Known open problem: LLM claim ids are content hashes and churn across
+   runs (measured: zero exact-text repeatability), so chain comparability
+   currently holds for mechanical claims only.
+4. **The trusted system creates the receipt.** A subagent must not create
+   the receipt that evaluates its own work. Today this holds by
+   construction in the PR gate (CI creates the receipt on the merge ref;
+   local receipts are advisory); the missing leg is authentication — a
+   signature binding the receipt to the runner and the exact input digest.
+5. **Receipts carry evidence, not proof.** Formal systems supply proof;
+   tests, fuzzers, and observations supply weaker but real evidence. The
+   tier ladder preserves this difference and the receipt never states more
+   than the probe demonstrated.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its
