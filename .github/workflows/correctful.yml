@@ -1,0 +1,65 @@
+# correctful as a merge gate: emit a receipt for every pull request, post it as
+# a (self-updating) PR comment, and block the merge only on REFUTED claims.
+# The remainder informs, never fails — that is the tool's contract.
+name: correctful
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  receipt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the receipt diffs against the base ref
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build correctful
+        run: go build -o correctful ./cmd/correctful
+
+      # -base auto resolves $GITHUB_BASE_REF (set by pull_request events).
+      # Capture the exit code instead of failing here, so the comment posts
+      # BEFORE the gate verdict is applied.
+      - name: Emit receipt
+        id: receipt
+        run: |
+          set +e
+          ./correctful -base auto -format md > receipt.md
+          echo "gate=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          # The text form into the job log for humans reading CI directly.
+          ./correctful -base auto || true
+
+      - name: Post or update PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Update the previous correctful comment when one exists (found by
+          # the marker WriteMarkdown emits), else create it.
+          marker='<!-- correctful-receipt -->'
+          comment_id=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))][0].id" 2>/dev/null || true)
+          if [ -n "$comment_id" ] && [ "$comment_id" != "null" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$comment_id" \
+              -F body=@receipt.md > /dev/null
+          else
+            gh pr comment "$PR" --body-file receipt.md
+          fi
+
+      - name: Gate
+        run: |
+          code='${{ steps.receipt.outputs.gate }}'
+          if [ "$code" = "1" ]; then
+            echo "correctful: a probe refuted a claim — blocking." >&2
+          elif [ "$code" != "0" ]; then
+            echo "correctful: receipt failed to run (exit $code)." >&2
+          fi
+          exit "$code"
