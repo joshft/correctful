@@ -244,6 +244,19 @@ const (
 // says nothing.
 func (e Evidence) Verified() bool { return e.Ran && e.Passed && e.Tier > T0Unverified }
 
+// CountsFor reports whether this evidence RAISES the given claim — the one
+// place the model-proposed-edge gate lives, shared by receipt weighing and
+// policy evaluation so the two can never disagree. For an LLM-proposed claim
+// a pass counts only with a coverage-confirmed edge (BindingFileCovered):
+// the probe→claim tie is the model's word, so the pass counts only when the
+// probe's own execution demonstrably reached the claim's file.
+func (e Evidence) CountsFor(c Claim) bool {
+	if !e.Verified() {
+		return false
+	}
+	return c.Source.Kind != SourceLLM || e.Binding == BindingFileCovered
+}
+
 // Refuted reports whether this evidence refutes its claim: the probe ran and
 // the claim did not hold.
 func (e Evidence) Refuted() bool { return e.Ran && !e.Passed }
@@ -385,6 +398,10 @@ type Receipt struct {
 	ToolVersion string        `json:"tool_version,omitempty"`
 	Change      ChangeRef     `json:"change"`
 	Results     []ClaimResult `json:"results"`
+	// Policy is the repository's evidence-floor evaluation — present only
+	// when the repo declares a policy file. Nil means no policy: nothing was
+	// required, so nothing was missed.
+	Policy *PolicyResult `json:"policy,omitempty"`
 	// Remainder is the subset of Results with Status == StatusUnverified,
 	// surfaced explicitly so a reader never has to derive it. This is the
 	// feature no other tool in the field ships.
@@ -393,5 +410,35 @@ type Receipt struct {
 	Summary   Summary       `json:"summary"`
 }
 
+// PolicyResult records how the repository's declared evidence floors held
+// against this change. The digest is a chain field: a receipt is comparable
+// to its predecessors only when the policy that judged it is identified —
+// and a policy CHANGE is itself the kind of change the trust base must
+// surface for human review.
+type PolicyResult struct {
+	// Path is the repo-relative policy file location.
+	Path string `json:"path"`
+	// Digest is the SHA-256 (hex) over the policy file's exact bytes.
+	Digest string `json:"digest"`
+	// Rules is the number of declared rules.
+	Rules int `json:"rules"`
+	// ExemptTestFiles counts matched files exempted as test files — probe
+	// sources, not evidence subjects. Disclosed so the exemption is visible.
+	ExemptTestFiles int `json:"exempt_test_files,omitempty"`
+	// Misses are the floor violations. The gate blocks on any.
+	Misses []PolicyMiss `json:"misses,omitempty"`
+}
+
+// PolicyMiss is one changed file that a rule matched and whose evidence did
+// not meet the rule's floor.
+type PolicyMiss struct {
+	File string `json:"file"`
+	// Rule names the violated rule (its declared name, or its paths).
+	Rule string `json:"rule"`
+	// Detail states what was found against what was required — "no verified
+	// claim ties to this file", or the best tied evidence versus the floor.
+	Detail string `json:"detail"`
+}
+
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.10"
+const SchemaVersion = "0.0.11"

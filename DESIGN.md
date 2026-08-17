@@ -400,6 +400,53 @@ draft of this section:
    tier ladder preserves this difference and the receipt never states more
    than the probe demonstrated.
 
+## The policy layer (schema 0.0.11): evidence floors per path
+
+The end state's second commitment, delivered: `correctful.json` at the repo
+root declares rules — paths plus a floor (`min_tier`, optionally a required
+`mechanism` and a required `scope`). Evaluation is per changed file, and
+the tie between a file and its evidence is STRUCTURAL, never assumed: a
+verified claim speaks for a file only when the claim was sourced from it
+(LLM claims with confirmed edges, spec-ids in code) or a reference site in
+shipped code names it. A matched file nothing demonstrably ties evidence
+to is a miss stated exactly that way — which makes floors honest and also
+scopes where they are USEFUL: repos that annotate code with claim ids, or
+run the LLM extractor. A floor on unannotated code fails, and should.
+
+Design decisions worth recording:
+
+- **Misses block the gate**, same as refutations — a floor that only
+  informs is not a floor. The exit-gate line in the receipt says which legs
+  block.
+- **Test files are exempt and the exemption is counted** — a `_test.go` is
+  evidence, not an evidence subject. Silent exemption would be a coverage
+  lie; the receipt shows the count.
+- **The policy digest is the second chain field** (after the tool
+  version): SHA-256 over the policy file's exact bytes, rendered short
+  beside the change. A policy change — the trust base changing — is
+  visible in the receipt chain, which is the review trigger the end
+  state's first commitment asks for.
+- **A malformed policy fails loudly before any probe runs.** A broken
+  floor must never fail open; a missing file simply means no policy.
+- **The LLM edge gate applies identically here** — `Evidence.CountsFor`
+  moved to the schema so weighing and policy evaluation share one
+  definition and can never disagree. A pass on an unconfirmed
+  model-proposed edge satisfies no floor.
+- **Each rule stands alone**: a file matched by two rules must satisfy
+  both floors; the miss row names the violated rule and the best tied
+  evidence, so the reader sees the gap, not just the verdict.
+
+Measured (first live run, 2026-08, on a real annotated repo's feature
+branch): a T1 floor over the changed command directory matched 26 files —
+8 exempt as test files (disclosed), 18 evaluated, ALL 18 missed with "no
+verified claim ties to this file", and the gate blocked. Correctly: the
+branch's 153 verified claims are all test-name-sourced, and none of the
+changed code files carries a reconciled claim id, so no verified evidence
+structurally speaks for them. The strictness is the finding — a floor
+demands the tie discipline (id-annotated code reconciled with id-named
+tests, or LLM extraction with confirmed edges), and states exactly what is
+missing when a repo has not adopted it.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its

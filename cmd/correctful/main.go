@@ -17,9 +17,9 @@
 //	-concurrency  max probes to run at once. Default: 4.
 //	-timeout      overall probe budget. Default: 5m.
 //
-// Exit status: 0 when no claim was refuted; 1 when a probe ran and a claim did
-// not hold (merge-gate semantics). The remainder never fails the run — it is an
-// honest report, not a defect.
+// Exit status: 0 when no claim was refuted and every declared policy floor was
+// met; 1 on a refutation or a policy miss (merge-gate semantics). The
+// remainder never fails the run — it is an honest report, not a defect.
 package main
 
 import (
@@ -32,6 +32,7 @@ import (
 	"github.com/joshft/correctful/internal/gitdiff"
 	"github.com/joshft/correctful/internal/harvest"
 	"github.com/joshft/correctful/internal/llmextract"
+	"github.com/joshft/correctful/internal/policy"
 	"github.com/joshft/correctful/internal/probe"
 	"github.com/joshft/correctful/internal/receipt"
 )
@@ -94,6 +95,14 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 	// a mid-branch receipt harvests the working tree.
 	change.InputDigest = gitdiff.InputDigest(root, change.Files)
 
+	// Load the policy BEFORE any probe runs: a malformed policy fails loudly
+	// here (a broken floor must never fail open), and a missing file simply
+	// means no policy.
+	pol, err := policy.Load(root)
+	if err != nil {
+		return err
+	}
+
 	// Harvest claims, then dispatch probes against them.
 	harvesters := harvest.Default()
 	if useLLM {
@@ -130,6 +139,9 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 		Dispatch(ctx, root, claims)
 
 	r := receipt.Assemble(change, claims, evidence, coverage)
+	if pol != nil {
+		r.Policy = policy.Evaluate(pol, r)
+	}
 
 	switch format {
 	case "json":
@@ -142,7 +154,7 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 		receipt.WriteText(os.Stdout, r)
 	}
 
-	if r.Summary.Refuted > 0 {
+	if r.Summary.Refuted > 0 || (r.Policy != nil && len(r.Policy.Misses) > 0) {
 		os.Exit(1)
 	}
 	return nil

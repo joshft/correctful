@@ -228,13 +228,15 @@ func anchorNote(c schema.Claim) string {
 // shaNote renders the immutable pins beside the symbolic refs, abbreviated:
 // the commit SHAs, and the input digest that identifies the harvested content
 // when the tree carries work no commit SHA covers.
-func shaNote(c schema.ChangeRef) string {
-	short := func(s string) string {
-		if len(s) > 12 {
-			return s[:12]
-		}
-		return s
+// short abbreviates a hex pin for display; the full value stays in the JSON.
+func short(s string) string {
+	if len(s) > 12 {
+		return s[:12]
 	}
+	return s
+}
+
+func shaNote(c schema.ChangeRef) string {
 	var parts []string
 	switch {
 	case c.BaseSHA != "" && c.HeadSHA != "":
@@ -350,18 +352,18 @@ func scrubHost(s, host string) string {
 //   - unverified: nothing ran that could raise the claim. Remainder.
 //
 // For an LLM-PROPOSED claim, a pass additionally requires a coverage-confirmed
-// edge (Binding "file-covered"): the probe→claim tie is the model's word, so
-// the pass counts only when the probe's own execution demonstrably reached the
-// claim's file. Fail-closed — a pass with no profile, or one whose execution
-// never touched the file, raises nothing and the claim stays in the remainder
-// (llmEdgeNote discloses which). Refutation stays UNCONDITIONAL: a failing
-// probe in the change blocks the gate no matter whose edge bound it.
+// edge (Evidence.CountsFor — the gate lives in schema so policy evaluation
+// applies the identical rule). Fail-closed — a pass with no profile, or one
+// whose execution never touched the file, raises nothing and the claim stays
+// in the remainder (llmEdgeNote discloses which). Refutation stays
+// UNCONDITIONAL: a failing probe in the change blocks the gate no matter
+// whose edge bound it.
 func weigh(c schema.Claim, evs []schema.Evidence) (schema.Status, schema.Tier) {
 	best := schema.T0Unverified
 	anyVerified, anyRefuted := false, false
 	for _, e := range evs {
 		switch {
-		case e.Verified() && (c.Source.Kind != schema.SourceLLM || e.Binding == schema.BindingFileCovered):
+		case e.CountsFor(c):
 			anyVerified = true
 			if e.Tier > best {
 				best = e.Tier
@@ -401,6 +403,9 @@ func WriteText(w io.Writer, r schema.Receipt) {
 	if note := exclusionNote(r.Change.Excluded); note != "" {
 		fmt.Fprintf(w, "  %s\n", note)
 	}
+	if p := r.Policy; p != nil {
+		fmt.Fprintf(w, "policy: %s · %s · %d rule(s)%s\n", p.Path, short(p.Digest), p.Rules, exemptNote(p))
+	}
 	fmt.Fprintln(w)
 
 	fmt.Fprintf(w, "claims: %d   verified: %d   refuted: %d   unverified: %d\n",
@@ -425,6 +430,13 @@ func WriteText(w io.Writer, r schema.Receipt) {
 				fmt.Fprintf(w, "  [%s] %s — %s%s%s%s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text,
 					anchorNote(res.Claim), llmNote(res.Claim), bindingNote(res))
 			}
+		}
+		fmt.Fprintln(w)
+	}
+	if p := r.Policy; p != nil && len(p.Misses) > 0 {
+		fmt.Fprintln(w, "POLICY MISSES (evidence floors not met — the gate blocks here)")
+		for _, m := range p.Misses {
+			fmt.Fprintf(w, "  %s — %s  [rule: %s]\n", m.File, m.Detail, m.Rule)
 		}
 		fmt.Fprintln(w)
 	}
@@ -487,6 +499,15 @@ func toolNote(r schema.Receipt) string {
 		return ""
 	}
 	return " · correctful " + r.ToolVersion
+}
+
+// exemptNote renders the policy's test-file exemption count when present —
+// the exemption is disclosed, never silent.
+func exemptNote(p *schema.PolicyResult) string {
+	if p.ExemptTestFiles == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" · %d test file(s) exempt (evidence sources)", p.ExemptTestFiles)
 }
 
 // detailOf picks the evidence detail a reader needs: for a refuted claim, the

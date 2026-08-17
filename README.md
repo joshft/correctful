@@ -99,9 +99,45 @@ shows the reference configuration:
 - The workflow writes the receipt as a comment on the pull request. The
   marker `<!-- correctful-receipt -->` identifies the comment. The workflow
   updates the same comment after each push.
-- The gate fails only when a probe refuted a claim.
+- The gate fails when a probe refuted a claim, or when the change missed a
+  declared policy floor.
 
 This repository uses this gate for each of its own pull requests.
+
+## Policy floors (optional)
+
+You can declare evidence floors for the paths that matter most. Write a
+`correctful.json` file in the repository root:
+
+```json
+{
+  "policy_version": 1,
+  "rules": [
+    {
+      "name": "auth-floor",
+      "paths": ["internal/auth/..."],
+      "min_tier": 2,
+      "mechanism": "go-test-pair"
+    }
+  ]
+}
+```
+
+The rule reads: each changed file under `internal/auth/` must have one
+verified claim that connects to that file, at tier T2 or higher, from an
+accept/reject test pair. A rule can also demand a measured execution scope
+(`"scope": "cross-package"`).
+
+- A connection is structural. The claim's source file, or a reference site
+  in the code, must name the changed file. The tool does not guess.
+- Test files are exempt. They supply evidence; they do not need evidence.
+  The receipt shows the count of exempt files.
+- A missed floor blocks the gate, in the same way as a refuted claim. The
+  receipt shows each miss with the best found evidence and the floor.
+- The receipt shows the SHA-256 digest of the policy file. A policy change
+  is visible in the receipt chain.
+- No policy file means no policy. A malformed policy file stops the run
+  with an error. It never fails open.
 
 ## What correctful examines
 
