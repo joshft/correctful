@@ -1,3 +1,9 @@
 /correctful
 /dist/
 *.receipt.json
+
+# The receipt's own output must never enter its own change scope: the CI shell
+# redirect creates receipt.md BEFORE the scanner walks the tree, so an
+# unignored receipt file would appear in the receipt as an untracked change.
+/receipt.md
+/receipt.json

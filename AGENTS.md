@@ -60,3 +60,21 @@ commit publishes the secret it removes.
   JSON receipt) and treat "could not run" as distinct from "refuted".
 - The schema (`schema/`) is the payload; changes to it are versioned
   (`SchemaVersion`) and deliberate.
+
+## How changes land
+
+correctful is dogfooded on itself: every change lands through a pull request,
+and the CI workflow (`.github/workflows/correctful.yml`) emits a receipt for
+the PR's diff as a self-updating comment. That receipt is the merge gate.
+
+- Never commit directly to `master`; branch, push, open a PR.
+- Read the receipt before merging. A refuted claim blocks the merge (the
+  workflow exits non-zero) and must be resolved by fixing the change — never
+  by weakening the probe or rewording the claim out of harvest range.
+- The remainder does not block, but it is part of the review: if the receipt's
+  remainder misstates what the change leaves unchecked — a false entry, a
+  missed claim, a misleading tier — that is a correctful bug the PR just
+  surfaced, and fixing it is the point of dogfooding. File or fix it before
+  merging.
+- Squash-merge, so one PR is one commit on `master`; the PR description
+  carries what the receipt could not check and why that is acceptable.
