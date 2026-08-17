@@ -346,3 +346,43 @@ func TestReceiptSanitizesPathsAndPinsSHAs(t *testing.T) {
 		t.Errorf("text header missing SHA pins:\n%s", text.String())
 	}
 }
+
+// TestDetailSanitizationIsCategorical: the sanitizer is a categorical rule at
+// the Assemble chokepoint, not an enumerated blocklist — EVERY absolute path
+// outside the repo collapses to its basename, closing the classes a
+// root+home enumeration left open: temp paths, toolchain roots, sibling
+// project names, other users' homes. In-repo paths stay fully readable, and
+// file:line actionability survives the collapse.
+func TestDetailSanitizationIsCategorical(t *testing.T) {
+	const repo = "/home/someone/src/proj"
+	cases := []struct{ in, want string }{
+		// In-repo: full relative path preserved (the reader's business).
+		{repo + "/pkg/x_test.go:12: boom", "./pkg/x_test.go:12: boom"},
+		// Temp path.
+		{"wrote /tmp/probe-x1/out.json", "wrote …/out.json"},
+		// Sibling project beside the repo: the name must not survive.
+		{"read /home/someone/src/otherproj/secret.cs:3", "read …/secret.cs:3"},
+		// Toolchain root, file:line intact.
+		{"panic at /usr/lib/go/src/testing/testing.go:1576: died", "panic at …/testing.go:1576: died"},
+		// Flag-glued path.
+		{"-coverprofile=/tmp/cov1/prof.out", "-coverprofile=…/prof.out"},
+		// URLs are not filesystem paths and pass untouched.
+		{"GET http://example.com/a/b: refused", "GET http://example.com/a/b: refused"},
+		// Repo-relative output was never a leak.
+		{"internal/probe/gotest.go:41: ok", "internal/probe/gotest.go:41: ok"},
+		// Single-component absolute names identify nothing.
+		{"read /dev: is a directory", "read /dev: is a directory"},
+	}
+	for _, c := range cases {
+		if got := sanitizePaths(c.in, repo); got != c.want {
+			t.Errorf("sanitizePaths(%q)\n got  %q\n want %q", c.in, got, c.want)
+		}
+	}
+
+	if got := scrubHost("dial tcp devbox42:8080: refused", "devbox42"); got != "dial tcp <host>:8080: refused" {
+		t.Errorf("hostname survived: %q", got)
+	}
+	if got := scrubHost("go test ok", "go"); got != "go test ok" {
+		t.Errorf("short-hostname guard failed: %q", got)
+	}
+}
