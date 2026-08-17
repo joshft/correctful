@@ -280,6 +280,24 @@ not proof the test asserts the right property, and the receipt's
 `[llm-proposed]` marker plus `[binding: file-coverage-proven]` state
 precisely that trust boundary on the row itself.
 
+Measured (first live runs, 2026-08 — three runs over two real merged
+diffs): 51 proposals total, 40 bound to a named changed test and verified
+with a coverage-confirmed edge (18/19 and 15/16 on the binding feature's
+own diff; 7/16 on the pair-runner diff, whose seven bound claims are
+exactly its load-bearing behavioral statements — skip-never-confers,
+build-failure-is-not-refutation, exact-name matching). All 11 unbound
+proposals stayed probe-less for the DESIGNED reasons: claims attributed to
+test files or non-Go files, claims of absence, or no test named — and the
+one unbindable claim on the feature diff was the same semantic claim in
+both runs (the schema version string, which no changed test asserts). Zero
+edge rejections fired live — the model proposed no wrong edge in these
+runs, so `file-not-reached` remains exercised only by tests — zero
+unconfirmed passes, zero refutations, zero hallucinated rows. Honest
+caveat: in a tightly-coupled repo, file-level granularity is permissive — a
+named test that executes the claim's file while asserting a different
+property would still confirm, which is why the verified row states
+file-coverage and nothing stronger.
+
 Measured (first live runs, 2026-08): on a wild-case diff — a real 19-file
 change with zero pre-written claims — 19 of 20 proposals were accurate,
 concrete, and falsifiable, with zero hallucinated files or mechanisms; the
