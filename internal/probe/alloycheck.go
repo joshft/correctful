@@ -77,7 +77,8 @@ type alloyFileRun struct {
 var alloyRuns sync.Map // abs model path -> *alloyFileRun
 
 func (AlloyCheckRunner) Run(ctx context.Context, repoDir string, claim schema.Claim, probeID string) schema.Evidence {
-	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T3Property}
+	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T3Property,
+		Mechanism: schema.MechanismAlloyCheck}
 
 	file, command, ok := schema.ParseAlloyCheckProbeID(probeID)
 	if !ok {

@@ -51,7 +51,8 @@ var dotnetPath = sync.OnceValue(func() string {
 var projLocks sync.Map // csproj path -> *sync.Mutex
 
 func (DotnetTestRunner) Run(ctx context.Context, repoDir string, claim schema.Claim, probeID string) schema.Evidence {
-	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T1Assertion}
+	ev := schema.Evidence{ClaimID: claim.ID, ProbeID: probeID, Tier: schema.T1Assertion,
+		Mechanism: schema.MechanismDotnetTest}
 
 	csproj, classDotMethod, ok := schema.ParseDotnetTestProbeID(probeID)
 	if !ok {

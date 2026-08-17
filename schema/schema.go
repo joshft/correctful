@@ -185,7 +185,34 @@ type Evidence struct {
 	// Binding* constants for the vocabulary. Empty: no coverage check applied
 	// (no code sites, or the probe kind has no prover yet).
 	Binding string `json:"binding,omitempty"`
+	// Mechanism identifies the probe kind that produced this evidence — the
+	// class axis a policy floor needs beside the tier ("this path requires a
+	// T2 adversarial pair"). Set by the runner from its own identity, so a
+	// policy engine never parses probe ids. Empty only when no runner ran.
+	Mechanism string `json:"mechanism,omitempty"`
+	// Scope is the probe's MEASURED execution footprint, known only for
+	// instrumented runs: ScopeSinglePackage when every executed block falls
+	// in one package directory, ScopeCrossPackage when they span more.
+	// Empty means unmeasured (no coverage profile) — never assumed.
+	Scope string `json:"scope,omitempty"`
+	// Environment records the toolchain the probe ran under, when the runner
+	// measures it (e.g. "go1.24.5 linux/amd64"). Empty means unmeasured.
+	Environment string `json:"environment,omitempty"`
 }
+
+// Mechanism values — one per runner kind.
+const (
+	MechanismGoTest     = "go-test"
+	MechanismGoTestPair = "go-test-pair"
+	MechanismDotnetTest = "dotnet-test"
+	MechanismAlloyCheck = "alloy-check"
+)
+
+// Scope values — the measured execution footprint of an instrumented run.
+const (
+	ScopeSinglePackage = "single-package"
+	ScopeCrossPackage  = "cross-package"
+)
 
 // Binding values — how a probe→claim edge was checked. The first two apply to
 // claims whose id is annotated in shipped code (RefSites); the file-level pair
@@ -359,4 +386,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.8"
+const SchemaVersion = "0.0.9"
