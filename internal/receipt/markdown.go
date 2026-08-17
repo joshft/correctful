@@ -26,6 +26,10 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	fmt.Fprintf(w, "## correctful receipt\n\n")
 	fmt.Fprintf(w, "**%d claims** — ✅ %d verified · ❌ %d refuted · ⚠️ %d unverified\n\n",
 		s.TotalClaims, s.Verified, s.Refuted, s.Unverified)
+	if a := s.Anchoring; a != nil {
+		fmt.Fprintf(w, "Anchoring: %d of %d spec-id claims resolved to definitions · %d ambiguous · %d orphan\n\n",
+			a.Resolved, a.SpecIDClaims, a.Ambiguous, a.Orphan)
+	}
 	fmt.Fprintf(w, "Change: `%s...%s` — %d files\n\n", r.Change.BaseRef, r.Change.HeadRef, len(r.Change.Files))
 
 	if s.Refuted > 0 {
@@ -49,7 +53,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "|---|---|---|")
 		for _, res := range r.Remainder {
 			fmt.Fprintf(w, "| `%s` | %s | `%s:%d` |\n",
-				mdCell(res.Claim.ID), mdCell(res.Claim.Text),
+				mdCell(res.Claim.ID), mdCell(res.Claim.Text+anchorNote(res.Claim)),
 				res.Claim.Source.File, res.Claim.Source.Line)
 		}
 	}
@@ -62,7 +66,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		for _, res := range r.Results {
 			if res.Status == schema.StatusVerified {
 				fmt.Fprintf(w, "| %s | `%s` | %s |\n",
-					res.EffectiveTier, mdCell(res.Claim.ID), mdCell(res.Claim.Text))
+					res.EffectiveTier, mdCell(res.Claim.ID), mdCell(res.Claim.Text+anchorNote(res.Claim)))
 			}
 		}
 		fmt.Fprintln(w, "\n</details>")

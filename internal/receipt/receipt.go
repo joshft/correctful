@@ -66,8 +66,50 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 			Refuted:     refuted,
 			Unverified:  unverified,
 			TierCounts:  tierCounts,
+			Anchoring:   anchoringSummary(claims),
 		},
 	}
+}
+
+// anchoringSummary tallies the binding layer's resolution outcomes. Nil when
+// no claim carries an anchor — a repo without a definition corpus.
+func anchoringSummary(claims []schema.Claim) *schema.AnchoringSummary {
+	var a schema.AnchoringSummary
+	for _, c := range claims {
+		if c.Anchor == nil {
+			continue
+		}
+		a.SpecIDClaims++
+		switch c.Anchor.Status {
+		case schema.AnchorResolved:
+			a.Resolved++
+		case schema.AnchorAmbiguous:
+			a.Ambiguous++
+		case schema.AnchorOrphan:
+			a.Orphan++
+		}
+	}
+	if a.SpecIDClaims == 0 {
+		return nil
+	}
+	return &a
+}
+
+// anchorNote renders a claim's anchor state as a row suffix. Resolved claims
+// need no marker — their upgraded text IS the definition. The marker calls
+// out the two states a reader should distrust: an id nothing defines, and an
+// id defined incompatibly in several places.
+func anchorNote(c schema.Claim) string {
+	if c.Anchor == nil {
+		return ""
+	}
+	switch c.Anchor.Status {
+	case schema.AnchorOrphan:
+		return "  [orphan id: defined nowhere in the spec corpus]"
+	case schema.AnchorAmbiguous:
+		return fmt.Sprintf("  [ambiguous id: %d definitions in the corpus]", len(c.Anchor.Sites))
+	}
+	return ""
 }
 
 // weigh reduces a claim's evidence to a status and an effective tier.
@@ -130,13 +172,18 @@ func WriteText(w io.Writer, r schema.Receipt) {
 			fmt.Fprintf(w, "  %s=%d", t.String(), n)
 		}
 	}
-	fmt.Fprint(w, "\n\n")
+	fmt.Fprintln(w)
+	if a := s.Anchoring; a != nil {
+		fmt.Fprintf(w, "anchoring: %d spec-id claims — %d resolved to definitions, %d ambiguous, %d orphan\n",
+			a.SpecIDClaims, a.Resolved, a.Ambiguous, a.Orphan)
+	}
+	fmt.Fprintln(w)
 
 	if s.Verified > 0 {
 		fmt.Fprintln(w, "VERIFIED")
 		for _, res := range r.Results {
 			if res.Status == schema.StatusVerified {
-				fmt.Fprintf(w, "  [%s] %s — %s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text)
+				fmt.Fprintf(w, "  [%s] %s — %s%s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text, anchorNote(res.Claim))
 			}
 		}
 		fmt.Fprintln(w)
@@ -158,8 +205,8 @@ func WriteText(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "  (empty — every harvested claim reached a probe)")
 	}
 	for _, res := range r.Remainder {
-		fmt.Fprintf(w, "  %s — %s  [%s:%d]\n", res.Claim.ID, res.Claim.Text,
-			res.Claim.Source.File, res.Claim.Source.Line)
+		fmt.Fprintf(w, "  %s — %s  [%s:%d]%s\n", res.Claim.ID, res.Claim.Text,
+			res.Claim.Source.File, res.Claim.Source.Line, anchorNote(res.Claim))
 	}
 
 	writeCoverage(w, r.Coverage)

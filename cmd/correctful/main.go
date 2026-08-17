@@ -94,6 +94,16 @@ func run(base, repo, format string, concurrency int, timeout time.Duration) erro
 	if err != nil {
 		return fmt.Errorf("harvesting claims: %w", err)
 	}
+
+	// Anchor spec-id claims against the repo's definition corpus — the whole
+	// tracked document set, not just the changed files, because the invariant
+	// a changed test names is defined in an unchanged spec.
+	docs, err := gitdiff.TrackedByPattern(ctx, root, "*.md", "*.markdown")
+	if err != nil {
+		return fmt.Errorf("listing definition corpus: %w", err)
+	}
+	harvest.AnchorClaims(claims, harvest.BuildDefIndex(root, docs), change.Files)
+
 	evidence := probe.NewDispatcher(concurrency, probe.Default()...).
 		Dispatch(ctx, root, claims)
 

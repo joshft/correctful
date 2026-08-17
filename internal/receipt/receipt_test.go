@@ -134,3 +134,66 @@ func TestCoverageDisclosesUnreadFiles(t *testing.T) {
 		t.Errorf("unread extension histogram missing:\n%s", out)
 	}
 }
+
+// TestAnchoringSummaryAndMarkers: the receipt discloses the binding layer —
+// headline counts plus per-row markers for the two distrust states (orphan,
+// ambiguous). Resolved claims carry no marker; their upgraded text IS the
+// disclosure. A claim set with no anchors yields no anchoring line at all.
+func TestAnchoringSummaryAndMarkers(t *testing.T) {
+	claims := []schema.Claim{
+		{ID: "INV-001", Text: "INV-001: loader accepts only signed bundles",
+			Anchor:   &schema.Anchor{Status: schema.AnchorResolved, Title: "loader accepts only signed bundles"},
+			ProbeIDs: []string{"go-test:a_test.go:TestINV001_Holds"}},
+		{ID: "INV-777", Text: "INV-777 (referenced; no bound probe from harvest)",
+			Anchor: &schema.Anchor{Status: schema.AnchorOrphan}},
+		{ID: "INV-004", Text: "INV-004 (referenced; no bound probe from harvest)",
+			Anchor: &schema.Anchor{Status: schema.AnchorAmbiguous, Sites: []schema.Source{{File: "a.md"}, {File: "b.md"}}}},
+	}
+	evidence := [][]schema.Evidence{
+		{{ClaimID: "INV-001", ProbeID: claims[0].ProbeIDs[0], Tier: schema.T1Assertion, Ran: true, Passed: true}},
+		nil,
+		nil,
+	}
+	r := Assemble(gitdiff.Change{BaseRef: "a", HeadRef: "b"}, claims, evidence, schema.Coverage{})
+
+	a := r.Summary.Anchoring
+	if a == nil || a.SpecIDClaims != 3 || a.Resolved != 1 || a.Ambiguous != 1 || a.Orphan != 1 {
+		t.Fatalf("anchoring summary = %+v, want 3/1/1/1", a)
+	}
+
+	var text strings.Builder
+	WriteText(&text, r)
+	out := text.String()
+	if !strings.Contains(out, "anchoring: 3 spec-id claims — 1 resolved to definitions, 1 ambiguous, 1 orphan") {
+		t.Errorf("text receipt missing anchoring summary:\n%s", out)
+	}
+	if !strings.Contains(out, "[orphan id: defined nowhere in the spec corpus]") {
+		t.Errorf("text receipt missing orphan marker:\n%s", out)
+	}
+	if !strings.Contains(out, "[ambiguous id: 2 definitions in the corpus]") {
+		t.Errorf("text receipt missing ambiguous marker:\n%s", out)
+	}
+	if strings.Contains(out, "signed bundles  [") {
+		t.Errorf("resolved claim carries a marker:\n%s", out)
+	}
+
+	var md strings.Builder
+	WriteMarkdown(&md, r)
+	if !strings.Contains(md.String(), "Anchoring: 1 of 3 spec-id claims resolved to definitions · 1 ambiguous · 1 orphan") {
+		t.Errorf("markdown receipt missing anchoring line:\n%s", md.String())
+	}
+	if !strings.Contains(md.String(), "[orphan id: defined nowhere in the spec corpus]") {
+		t.Errorf("markdown receipt missing orphan marker:\n%s", md.String())
+	}
+
+	// No anchors, no anchoring line.
+	r2 := Assemble(gitdiff.Change{}, []schema.Claim{{ID: "TestFoo", Text: "t"}}, nil, schema.Coverage{})
+	if r2.Summary.Anchoring != nil {
+		t.Errorf("anchoring summary = %+v, want nil without anchors", r2.Summary.Anchoring)
+	}
+	var t2 strings.Builder
+	WriteText(&t2, r2)
+	if strings.Contains(t2.String(), "anchoring:") {
+		t.Errorf("text receipt renders anchoring line without a corpus:\n%s", t2.String())
+	}
+}

@@ -89,6 +89,7 @@ const (
 	SourceAlloyAssert SourceKind = "alloy-assert" // an Alloy `assert` block
 	SourceAlloyRun    SourceKind = "alloy-run"    // an Alloy `run` command (witness)
 	SourceRFCMust     SourceKind = "rfc-must"     // a MUST/MUST-NOT clause in an RFC
+	SourceSpecDef     SourceKind = "spec-def"     // a definition heading in the spec corpus
 )
 
 // Source is the provenance of a harvested claim — the evidence trail back to the
@@ -98,6 +99,42 @@ type Source struct {
 	File string     `json:"file"`
 	Line int        `json:"line,omitempty"`
 	Ref  string     `json:"ref"` // the raw token, e.g. the test function name
+}
+
+// AnchorStatus is the outcome of resolving a claim's identifier against the
+// repo's definition corpus — the first rung of proof-carrying binding. A name
+// like INV-004 in a test is an ATTESTATION; anchoring asks whether the id even
+// exists as a stated invariant, and refuses to pretend when it cannot tell.
+type AnchorStatus string
+
+const (
+	// AnchorResolved: the id has exactly one definition — one distinct title,
+	// possibly repeated verbatim in several documents (a spec quoted by a
+	// review artifact still names one invariant). The claim's Text is
+	// upgraded to the definition's own words.
+	AnchorResolved AnchorStatus = "resolved"
+	// AnchorAmbiguous: the id is defined in several places with DIFFERENT
+	// titles. Id namespaces are feature-local in practice — a spec corpus
+	// commonly restarts INV-001 per feature — so a bare id cannot say which
+	// invariant it means. correctful discloses the collision; it never picks.
+	AnchorAmbiguous AnchorStatus = "ambiguous"
+	// AnchorOrphan: the corpus defines identifiers, but not this one. The
+	// claim rests on a name attestation with no definition behind it — a
+	// stale, mistyped, or invented id.
+	AnchorOrphan AnchorStatus = "orphan"
+)
+
+// Anchor records how a spec-id claim resolved against the definition corpus.
+// Claims whose id is not a spec identifier carry no Anchor; likewise every
+// claim in a repo with no definition corpus at all — a repo that never states
+// invariants in documents should not have every claim flagged for it.
+type Anchor struct {
+	Status AnchorStatus `json:"status"`
+	// Title is the definition's title, set only when resolved.
+	Title string `json:"title,omitempty"`
+	// Sites are the definition heading locations: all agreeing sites when
+	// resolved, every colliding site when ambiguous, empty when orphan.
+	Sites []Source `json:"sites,omitempty"`
 }
 
 // Claim is something a change asserts to be true.
@@ -118,6 +155,9 @@ type Claim struct {
 	// refutation by ANY of them refutes the claim — passing probes never
 	// outvote a failing one.
 	ProbeIDs []string `json:"probe_ids,omitempty"`
+	// Anchor is the claim id's resolution against the repo's definition
+	// corpus (spec-id claims only; nil when no corpus exists).
+	Anchor *Anchor `json:"anchor,omitempty"`
 }
 
 // Evidence is the outcome of running one probe against one claim.
@@ -170,6 +210,15 @@ type ClaimResult struct {
 	Evidence      []Evidence `json:"evidence,omitempty"`
 }
 
+// AnchoringSummary is the headline arithmetic of the binding layer: of the
+// claims whose id is a spec identifier, how many rest on a real definition.
+type AnchoringSummary struct {
+	SpecIDClaims int `json:"spec_id_claims"`
+	Resolved     int `json:"resolved"`
+	Ambiguous    int `json:"ambiguous"`
+	Orphan       int `json:"orphan"`
+}
+
 // Summary is the headline arithmetic of a receipt.
 type Summary struct {
 	TotalClaims int `json:"total_claims"`
@@ -179,6 +228,8 @@ type Summary struct {
 	// TierCounts is keyed by tier label (e.g. "T1-assertion") for a readable
 	// payload.
 	TierCounts map[string]int `json:"tier_counts"`
+	// Anchoring is present when the repo has a definition corpus.
+	Anchoring *AnchoringSummary `json:"anchoring,omitempty"`
 }
 
 // FileCoverage records what the harvest actually did with one changed file.
@@ -222,4 +273,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.2"
+const SchemaVersion = "0.0.3"

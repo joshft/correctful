@@ -2,7 +2,9 @@ package gitdiff
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -69,5 +71,38 @@ func TestDetectBaseFailsLoudWithNoCandidate(t *testing.T) {
 	dir := initRepo(t, "trunk") // not in the candidate list
 	if _, err := DetectBase(context.Background(), dir); err == nil {
 		t.Fatal("expected an error when no candidate base resolves")
+	}
+}
+
+// TestTrackedByPattern: only tracked files matching the patterns come back —
+// an untracked document is not part of the definition corpus.
+func TestTrackedByPattern(t *testing.T) {
+	dir := initRepo(t, "main")
+	write := func(rel, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("spec.md", "# Spec\n")
+	write("main.go", "package main\n")
+	for _, args := range [][]string{
+		{"add", "spec.md", "main.go"},
+		{"commit", "-q", "-m", "add files"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write("scratch.md", "# untracked\n")
+
+	got, err := TrackedByPattern(context.Background(), dir, "*.md", "*.markdown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "spec.md" {
+		t.Fatalf("TrackedByPattern = %v, want [spec.md]", got)
 	}
 }

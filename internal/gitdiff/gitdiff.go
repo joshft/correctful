@@ -110,6 +110,19 @@ func ResolveAll(ctx context.Context, dir string) (Change, error) {
 	}, nil
 }
 
+// TrackedByPattern lists tracked files matching the given pathspec patterns
+// (e.g. "*.md"), repo-relative. Tracked only, deliberately: the definition
+// corpus a claim resolves against should be what the repo COMMITS to, not a
+// scratch note in the working tree.
+func TrackedByPattern(ctx context.Context, dir string, patterns ...string) ([]string, error) {
+	args := append([]string{"ls-files", "--"}, patterns...)
+	out, err := run(ctx, dir, args...)
+	if err != nil {
+		return nil, err
+	}
+	return nonEmptyLines(out), nil
+}
+
 func run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir

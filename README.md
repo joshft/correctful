@@ -147,6 +147,24 @@ claims that are *already written* into the change:
   That is the point: the receipt now *states* the normative surface nothing
   checks instead of silently not knowing it exists. `SHOULD`/`MAY` are
   excluded — the remainder carries obligations, not options.
+- **Spec-id claims anchor to their definitions — or the receipt says why not.**
+  The first rung of proof-carrying binding. Every id-shaped claim resolves
+  against the repo's definition corpus (tracked markdown, dot-dirs INCLUDED —
+  claims may only *originate* from shipped code, but they *resolve* against
+  documents anywhere): a definition is a heading of the form `### INV-004:
+  <title>`, with an explicit separator required so a fixture file merely
+  *named* for an id defines nothing. A uniquely-titled id **resolves** and the
+  claim adopts the definition's own words; an id defined differently in
+  several specs is **ambiguous** — id namespaces are feature-local in practice
+  (a measured corpus had 14 of 34 spec files each defining their own INV-004)
+  — unless exactly one definition lies inside the changed files themselves
+  (the change carrying its own spec has declared its namespace: a mechanical
+  join, not a guess); an id the corpus never defines is an **orphan**, named
+  in the receipt. Sub-variant ids (`INV-013d`) resolve through their parent
+  without adopting its title. Measured on a real 101-file change: 53 of 72
+  spec-id claims resolved, 17 honestly ambiguous, and the 2 orphans were both
+  real findings — an antipattern id cited in a PR title but never added to
+  the catalog, and an invariant no document defines.
 - **Same-id claims merge; accept/reject pairs earn T2.** Every test named for
   one invariant becomes a probe of the same claim — all run, any can refute.
   When one of those tests is accept-polarity and another is reject-polarity
@@ -171,8 +189,9 @@ than smoothed over:
   its *name* says so; correctful trusts that annotation and does not verify the
   test's assertions actually exercise the invariant. This is the same trust every
   test-naming convention already asks of a reader — but it is trust, not proof.
-  A stronger binding (does the test reach the code the invariant governs?) is a
-  later, proof-carrying increment.
+  Anchoring (above) now checks the id *exists* and adopts its definition, and
+  discloses orphans — but existence is not exercise. The stronger binding
+  (does the test reach the code the invariant governs?) is the next rung.
 - **Bare ids don't reconcile with sub-variant tests.** A source reference to
   `INV-007` is not matched by tests named for `INV-007a…e`; correctful leaves
   bare `INV-007` in the remainder rather than assume the parts cover the whole.
