@@ -168,43 +168,6 @@ func failDetail(out string) string {
 	return "(no output)"
 }
 
-// runGoTest invokes `go test` for a -run pattern in pkgDir under repoDir.
-// -count=1 ensures a fresh execution rather than a cached verdict. Still used
-// by the pair runner, whose verdict comes from parsing "--- PASS:" lines in
-// the -v output (a skip prints "--- SKIP:" and so cannot false-pass there).
-func runGoTest(ctx context.Context, repoDir, pkgDir, runPattern string, verbose bool) (string, error) {
-	args := []string{"test", "-run", runPattern, "-count=1"}
-	if verbose {
-		args = append(args, "-v")
-	}
-	args = append(args, pkgDir)
-	cmd := exec.CommandContext(ctx, "go", args...)
-	cmd.Dir = repoDir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-// couldNotRunMarkers are substrings that mean a plain-text probe run never
-// validly executed (build error, missing target). Used by the pair runner;
-// deliberately narrow: a marker that also appears in ordinary assertion
-// output would let a real refutation be laundered into "did not run".
-var couldNotRunMarkers = []string{
-	"no tests to run",
-	"no test files",
-	"[build failed]",
-	"no required module provides",
-}
-
-func couldNotRun(out string) bool {
-	l := strings.ToLower(out)
-	for _, m := range couldNotRunMarkers {
-		if strings.Contains(l, m) {
-			return true
-		}
-	}
-	return false
-}
-
 // firstMeaningfulLine returns a short summary line for the receipt: the first
 // FAIL/ok/error line, else the first non-empty line.
 func firstMeaningfulLine(out string) string {

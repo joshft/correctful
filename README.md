@@ -228,8 +228,11 @@ claims that are *already written* into the change:
   one invariant becomes a probe of the same claim — all run, any can refute.
   When one of those tests is accept-polarity and another is reject-polarity
   (exact-match name vocabulary, same package), the two collapse into a compound
-  pair probe: one `go test` invocation, verified from verbose output that *both*
-  actually executed and passed, conferring T2. The polarity vocabulary is
+  pair probe: one `go test -json` invocation under the same event-stream
+  discipline as the single runner — the pair passes only on an explicit pass
+  event for *each* name (a skipped or renamed-away side exits 0 and must not
+  confer T2), a failing side refutes, and an infra failure is not-run, never a
+  refutation — conferring T2. The polarity vocabulary is
   deliberately conservative — a mis-paired probe would mint an unearned T2, and
   ambiguous names classify as neither polarity.
 

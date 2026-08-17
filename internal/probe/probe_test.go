@@ -241,27 +241,21 @@ func TestAlloyProbeIDRoundTrips(t *testing.T) {
 	}
 }
 
-// TestCouldNotRunDetectsBuildFailure: a build failure is "did not run", so it
-// can never be recorded as a refutation.
-func TestCouldNotRunDetectsBuildFailure(t *testing.T) {
-	if !couldNotRun("FAIL\t[build failed]") {
-		t.Error("build failure not detected as could-not-run")
+// TestPairVerdictMatchesExactNamesOnly: the compound verdict counts events
+// for exactly the two named top-level tests — a subtest ("TestA/sub") or a
+// name sharing the prefix ("TestABC") must never supply a side's pass. A
+// sloppy match here would let a pair pass on evidence from the wrong test.
+func TestPairVerdictMatchesExactNamesOnly(t *testing.T) {
+	events := []goTestEvent{
+		{Action: "pass", Test: "TestA/sub"},
+		{Action: "pass", Test: "TestABC"},
+		{Action: "pass", Test: "TestB"},
 	}
-	if couldNotRun("--- FAIL: TestX (0.00s)") {
-		t.Error("a real test failure was misread as could-not-run")
+	if ran, passed, _ := pairVerdictFromEvents(events, "TestA", "TestB"); ran || passed {
+		t.Error("subtest or prefix collision supplied a side's pass")
 	}
-}
-
-// TestPassedInExcludesSubtestsAndPrefixes: the pass check matches exactly the
-// named top-level test — not its subtests, not a longer name sharing the
-// prefix. A sloppy match here would let a pair pass on evidence from the wrong
-// test.
-func TestPassedInExcludesSubtestsAndPrefixes(t *testing.T) {
-	out := "=== RUN   TestA\n--- PASS: TestA/sub (0.00s)\n--- PASS: TestABC (0.01s)\n"
-	if testPassedIn(out, "TestA") {
-		t.Error("subtest or prefix collision counted as a top-level pass")
-	}
-	if !testPassedIn("--- PASS: TestA (0.02s)\n", "TestA") {
-		t.Error("a genuine top-level pass was not recognized")
+	events = append(events, goTestEvent{Action: "pass", Test: "TestA"})
+	if ran, passed, _ := pairVerdictFromEvents(events, "TestA", "TestB"); !ran || !passed {
+		t.Error("a genuine pair of top-level passes was not recognized")
 	}
 }
