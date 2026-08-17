@@ -38,6 +38,7 @@ jobs:
           echo "gate=$?" >> "$GITHUB_OUTPUT"
           set -e
           cat receipt.md
+          cat receipt.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Post or update PR comment
         env:
