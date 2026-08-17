@@ -165,6 +165,21 @@ claims that are *already written* into the change:
   spec-id claims resolved, 17 honestly ambiguous, and the 2 orphans were both
   real findings — an antipattern id cited in a PR title but never added to
   the catalog, and an invariant no document defines.
+- **Go probe bindings are coverage-proven where the code is annotated.** The
+  second rung. When a claim's id is also written into shipped code (its
+  *reference sites*, preserved through claim merges), the go-test probe run
+  is instrumented (`-coverprofile -coverpkg=./...`; measured cost ~0.1s per
+  warm run) and each claim↔probe edge is checked against the one shared
+  profile: did execution reach the enclosing function of any annotated site?
+  **covered** upgrades the trust story from "the test says it is about
+  INV-004" to "the test demonstrably executes the code annotated with
+  INV-004"; **name-only** says the binding was checked and no annotated
+  region was reached — a disclosure, not an accusation (on the measured
+  change, both name-only rows were true: one probe was an AST-inspection
+  test that reads the annotated function without executing it, the other
+  exercised the library beneath the annotated cmd-level enforcement sites).
+  Instrumentation never degrades a verdict: an instrumented run that cannot
+  execute falls back to a plain run and simply carries no binding statement.
 - **Same-id claims merge; accept/reject pairs earn T2.** Every test named for
   one invariant becomes a probe of the same claim — all run, any can refute.
   When one of those tests is accept-polarity and another is reject-polarity
@@ -185,13 +200,15 @@ correctful was run on itself and on a real 101-file production change on its
 second day. These limitations surfaced immediately and are recorded here rather
 than smoothed over:
 
-- **Coverage is name-attested, not proven.** A test binds an invariant because
-  its *name* says so; correctful trusts that annotation and does not verify the
-  test's assertions actually exercise the invariant. This is the same trust every
-  test-naming convention already asks of a reader — but it is trust, not proof.
-  Anchoring (above) now checks the id *exists* and adopts its definition, and
-  discloses orphans — but existence is not exercise. The stronger binding
-  (does the test reach the code the invariant governs?) is the next rung.
+- **Binding proof has honest edges.** Anchoring checks an id *exists*;
+  coverage-proven binding checks the probe *reaches* the annotated code. What
+  remains trust: "covered" does not prove the test asserts the right property
+  about the region it reaches; the prover sees in-process execution only
+  (a test that drives a subprocess would read name-only); it evaluates plain
+  go-test probes (pair probes and C#/Alloy probes carry no binding statement
+  yet); and an annotation outside any function — on a const block, a file
+  header — is not checkable, so the claim carries no statement rather than a
+  guess. Where nothing was checked, the receipt says nothing.
 - **Bare ids don't reconcile with sub-variant tests.** A source reference to
   `INV-007` is not matched by tests named for `INV-007a…e`; correctful leaves
   bare `INV-007` in the remainder rather than assume the parts cover the whole.

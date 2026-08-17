@@ -287,3 +287,43 @@ func TestIsTestFunc(t *testing.T) {
 		}
 	}
 }
+
+// TestRefSitesCollectedAndMerged: every code sighting of an id becomes a
+// reference site (not just the first), and the merge into a probed test claim
+// unions them — the coverage prover checks probes against these sites, so
+// dropping any would blind it.
+func TestRefSitesCollectedAndMerged(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"a.go":      "package x\n// INV-950: the gate holds.\nfunc gate() {}\n",
+		"b.go":      "package x\n// see INV-950 for the gate contract\nfunc other() {}\n",
+		"x_test.go": "package x\nimport \"testing\"\nfunc TestINV950_Holds(t *testing.T) {}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claims, _, err := Run(dir, []string{"a.go", "b.go", "x_test.go"}, Default()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *schema.Claim
+	for i := range claims {
+		if claims[i].ID == "INV-950" {
+			got = &claims[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("no INV-950 claim in %v", claims)
+	}
+	if len(got.ProbeIDs) != 1 {
+		t.Errorf("probes = %v, want the test probe", got.ProbeIDs)
+	}
+	if len(got.RefSites) != 2 || got.RefSites[0].File != "a.go" || got.RefSites[1].File != "b.go" {
+		t.Errorf("ref sites = %+v, want both code sightings in file order", got.RefSites)
+	}
+	if got.RefSites[0].Line != 2 {
+		t.Errorf("a.go site line = %d, want 2", got.RefSites[0].Line)
+	}
+}

@@ -6,6 +6,7 @@ package probe
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/joshft/correctful/schema"
@@ -51,6 +52,20 @@ func NewDispatcher(concurrency int, runners ...Runner) *Dispatcher {
 // with Ran=false — recorded, not silently dropped. The remainder is computed
 // from what did not verify, so an unrunnable probe must leave a trace.
 func (d *Dispatcher) Dispatch(ctx context.Context, repoDir string, claims []schema.Claim) [][]schema.Evidence {
+	// Pre-pass: mark go-test probes whose claims carry code reference sites —
+	// those runs are instrumented for coverage so the attribution pass below
+	// can evaluate each edge's binding (see coverage.go).
+	for _, c := range claims {
+		if !hasGoRefSite(c) {
+			continue
+		}
+		for _, pid := range c.ProbeIDs {
+			if strings.HasPrefix(pid, schema.GoTestProbePrefix) {
+				coverWanted.Store(pid, true)
+			}
+		}
+	}
+
 	// Collect unique probe ids, keeping a representative claim for each.
 	results := map[string]*schema.Evidence{}
 	sem := make(chan struct{}, d.concurrency)
@@ -89,6 +104,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, repoDir string, claims []sche
 		for j, pid := range c.ProbeIDs {
 			ev := *results[pid]
 			ev.ClaimID = c.ID
+			// Binding is a property of the EDGE: the shared execution's
+			// profile is evaluated against THIS claim's reference sites.
+			if ev.Ran {
+				if p, ok := covProfiles.Load(pid); ok {
+					ev.Binding = bindingFor(repoDir, c.RefSites, p.(covProfile))
+				}
+			}
 			out[i][j] = ev
 		}
 	}

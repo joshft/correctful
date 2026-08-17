@@ -95,6 +95,27 @@ func anchoringSummary(claims []schema.Claim) *schema.AnchoringSummary {
 	return &a
 }
 
+// bindingNote reduces a claim's evidence to a binding marker for its row.
+// "coverage-proven" wins as soon as ANY probe demonstrably reached an
+// annotated reference site; "name-only" means the binding was checked for at
+// least one probe and no annotated region was reached; no marker means no
+// coverage check applied.
+func bindingNote(res schema.ClaimResult) string {
+	nameOnly := false
+	for _, e := range res.Evidence {
+		switch e.Binding {
+		case "covered":
+			return "  [binding: coverage-proven]"
+		case "name-only":
+			nameOnly = true
+		}
+	}
+	if nameOnly {
+		return "  [binding: name-only]"
+	}
+	return ""
+}
+
 // anchorNote renders a claim's anchor state as a row suffix. Resolved claims
 // need no marker — their upgraded text IS the definition. The marker calls
 // out the two states a reader should distrust: an id nothing defines, and an
@@ -183,7 +204,8 @@ func WriteText(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "VERIFIED")
 		for _, res := range r.Results {
 			if res.Status == schema.StatusVerified {
-				fmt.Fprintf(w, "  [%s] %s — %s%s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text, anchorNote(res.Claim))
+				fmt.Fprintf(w, "  [%s] %s — %s%s%s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text,
+					anchorNote(res.Claim), bindingNote(res))
 			}
 		}
 		fmt.Fprintln(w)

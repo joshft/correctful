@@ -66,7 +66,8 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		for _, res := range r.Results {
 			if res.Status == schema.StatusVerified {
 				fmt.Fprintf(w, "| %s | `%s` | %s |\n",
-					res.EffectiveTier, mdCell(res.Claim.ID), mdCell(res.Claim.Text+anchorNote(res.Claim)))
+					res.EffectiveTier, mdCell(res.Claim.ID),
+					mdCell(res.Claim.Text+anchorNote(res.Claim)+bindingNote(res)))
 			}
 		}
 		fmt.Fprintln(w, "\n</details>")

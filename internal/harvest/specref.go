@@ -61,7 +61,8 @@ type SpecRefHarvester struct{}
 func (SpecRefHarvester) Name() string { return "spec-ref" }
 
 func (SpecRefHarvester) Harvest(repoDir string, files []string) (Result, error) {
-	seen := map[string]bool{}
+	sites := map[string][]schema.Source{}
+	var order []string // first-seen id order for stable output
 	var res Result
 
 	for _, rel := range files {
@@ -83,14 +84,30 @@ func (SpecRefHarvester) Harvest(repoDir string, files []string) (Result, error) 
 		// Read here means identifier-scanned only — a coverage entry whose sole
 		// reader is spec-ref was never parsed for native claim constructs.
 		res.Read = append(res.Read, rel)
-		res.Claims = append(res.Claims, scanRefs(f, rel, seen)...)
+		scanRefs(f, rel, sites, &order)
 		f.Close()
+	}
+
+	// One claim per id, carrying EVERY reference site: the sites are the
+	// annotated code regions a coverage-proven binding later checks probes
+	// against, so dropping all but the first sighting would blind the prover.
+	for _, id := range order {
+		res.Claims = append(res.Claims, schema.Claim{
+			ID:       id,
+			Shape:    schema.ShapeInvariant,
+			Text:     id + " (referenced; no bound probe from harvest)",
+			Source:   sites[id][0],
+			RefSites: sites[id],
+			// No probes: this claim is remainder-bound unless a test for the
+			// same id is harvested and merges its probes in reconciliation.
+		})
 	}
 	return res, nil
 }
 
-func scanRefs(f *os.File, rel string, seen map[string]bool) []schema.Claim {
-	var claims []schema.Claim
+// scanRefs records every identifier sighting in one file — at most one site
+// per (id, line) — into sites/order.
+func scanRefs(f *os.File, rel string, sites map[string][]schema.Source, order *[]string) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	lineNo := 0
@@ -100,31 +117,27 @@ func scanRefs(f *os.File, rel string, seen map[string]bool) []schema.Claim {
 		line := sc.Bytes()
 		read += len(line)
 		if read > maxScanBytes {
-			break
+			return
 		}
 		if bytes.IndexByte(line, 0) >= 0 {
-			return nil // binary file: stop scanning it entirely
+			return // binary file: stop scanning it entirely
 		}
 		for _, m := range specIDRe.FindAll(line, -1) {
 			id := normalizeSpecID(string(m))
-			if id == "" || seen[id] {
+			if id == "" {
 				continue
 			}
-			seen[id] = true
-			claims = append(claims, schema.Claim{
-				ID:    id,
-				Shape: schema.ShapeInvariant,
-				Text:  id + " (referenced; no bound probe from harvest)",
-				Source: schema.Source{
-					Kind: schema.SourceSpecID,
-					File: rel,
-					Line: lineNo,
-					Ref:  string(m),
-				},
-				// No probes: this claim is remainder-bound unless a test for the
-				// same id is harvested and merges its probes in reconciliation.
+			if _, seen := sites[id]; !seen {
+				*order = append(*order, id)
+			} else if last := sites[id][len(sites[id])-1]; last.File == rel && last.Line == lineNo {
+				continue // same id twice on one line is one site
+			}
+			sites[id] = append(sites[id], schema.Source{
+				Kind: schema.SourceSpecID,
+				File: rel,
+				Line: lineNo,
+				Ref:  string(m),
 			})
 		}
 	}
-	return claims
 }

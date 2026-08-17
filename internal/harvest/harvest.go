@@ -11,6 +11,7 @@ package harvest
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/joshft/correctful/schema"
@@ -65,12 +66,16 @@ func Run(repoDir string, files []string, harvesters ...Harvester) ([]schema.Clai
 			return
 		}
 		// A probe-bearing claim supersedes a probe-less placeholder's identity;
-		// otherwise first-seen identity wins. Probes always union.
+		// otherwise first-seen identity wins. Probes always union, and so do
+		// reference sites — the merge must not lose the annotated code regions
+		// the coverage prover checks probes against.
 		if len(existing.ProbeIDs) == 0 && len(c.ProbeIDs) > 0 {
+			c.RefSites = unionSources(existing.RefSites, c.RefSites)
 			byID[c.ID] = c
 			return
 		}
 		existing.ProbeIDs = unionStrings(existing.ProbeIDs, c.ProbeIDs)
+		existing.RefSites = unionSources(existing.RefSites, c.RefSites)
 		byID[c.ID] = existing
 	}
 
@@ -110,6 +115,23 @@ func Run(repoDir string, files []string, harvesters ...Harvester) ([]schema.Clai
 		}
 	}
 	return DetectPairs(out), cov, nil
+}
+
+// unionSources appends the elements of b not already in a (by file:line),
+// preserving order.
+func unionSources(a, b []schema.Source) []schema.Source {
+	seen := make(map[string]bool, len(a))
+	key := func(s schema.Source) string { return s.File + ":" + strconv.Itoa(s.Line) }
+	for _, x := range a {
+		seen[key(x)] = true
+	}
+	for _, x := range b {
+		if !seen[key(x)] {
+			seen[key(x)] = true
+			a = append(a, x)
+		}
+	}
+	return a
 }
 
 // unionStrings appends the elements of b not already in a, preserving order.

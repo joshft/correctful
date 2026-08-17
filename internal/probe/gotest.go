@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path"
 	"regexp"
@@ -32,9 +33,24 @@ func (GoTestRunner) Run(ctx context.Context, repoDir string, claim schema.Claim,
 		return ev
 	}
 	pkgDir := "./" + path.Dir(file)
+	pattern := "^" + regexp.QuoteMeta(name) + "$"
 
 	start := time.Now()
-	out, err := runGoTest(ctx, repoDir, pkgDir, "^"+regexp.QuoteMeta(name)+"$", false)
+	var out string
+	var err error
+	if _, wanted := coverWanted.Load(probeID); wanted {
+		// Instrumented run: same verdict source, plus a coverage profile for
+		// the binding evaluation. Instrumentation must never degrade the
+		// verdict — if the instrumented run could not execute (a package
+		// outside the probe's build set fails to instrument, say), fall back
+		// to the plain run and simply carry no binding statement.
+		out, err = runGoTestCover(ctx, repoDir, pkgDir, pattern, probeID)
+		if couldNotRun(out) {
+			out, err = runGoTest(ctx, repoDir, pkgDir, pattern, false)
+		}
+	} else {
+		out, err = runGoTest(ctx, repoDir, pkgDir, pattern, false)
+	}
 	ev.Duration = time.Since(start).Round(time.Millisecond).String()
 
 	switch {
@@ -67,6 +83,32 @@ func runGoTest(ctx context.Context, repoDir, pkgDir, runPattern string, verbose 
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// runGoTestCover runs the probe instrumented (-coverpkg=./... so a reference
+// site outside the test's own package still profiles; measured cost ~0.1s per
+// warm run) and parses the profile into covProfiles for the binding pass.
+func runGoTestCover(ctx context.Context, repoDir, pkgDir, runPattern, probeID string) (string, error) {
+	prof, err := os.CreateTemp("", "correctful-cov-*.out")
+	if err != nil {
+		return "", err
+	}
+	profPath := prof.Name()
+	prof.Close()
+	defer os.Remove(profPath)
+
+	args := []string{"test", "-run", runPattern, "-count=1",
+		"-coverprofile=" + profPath, "-coverpkg=./...", pkgDir}
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = repoDir
+	outB, err := cmd.CombinedOutput()
+	out := string(outB)
+	if !couldNotRun(out) {
+		if data, rerr := os.ReadFile(profPath); rerr == nil && len(data) > 0 {
+			covProfiles.Store(probeID, parseCoverProfile(string(data)))
+		}
+	}
+	return out, err
 }
 
 // couldNotRunMarkers are substrings that mean the probe never validly executed

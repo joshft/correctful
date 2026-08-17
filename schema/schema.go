@@ -158,6 +158,10 @@ type Claim struct {
 	// Anchor is the claim id's resolution against the repo's definition
 	// corpus (spec-id claims only; nil when no corpus exists).
 	Anchor *Anchor `json:"anchor,omitempty"`
+	// RefSites are the places SHIPPED CODE names this claim's id — the
+	// annotated regions a coverage-proven binding checks a probe against.
+	// Populated by the reference harvester and unioned through claim merges.
+	RefSites []Source `json:"ref_sites,omitempty"`
 }
 
 // Evidence is the outcome of running one probe against one claim.
@@ -169,6 +173,16 @@ type Evidence struct {
 	Passed   bool   `json:"passed"` // did it pass? (meaningful only when Ran)
 	Detail   string `json:"detail,omitempty"`
 	Duration string `json:"duration,omitempty"`
+	// Binding states how strongly this probe is tied to THIS claim — the
+	// second rung of proof-carrying binding, orthogonal to the tier.
+	// "covered": the probe's execution demonstrably reached the enclosing
+	// function of a code site naming the claim's id — proof the test
+	// exercises the annotated region (still not proof it asserts the right
+	// property). "name-only": the binding was checked and NO annotated region
+	// was reached — the tie between this probe and this claim is the name
+	// alone. Empty: no coverage check applied (no code sites, or the probe
+	// kind has no prover yet).
+	Binding string `json:"binding,omitempty"`
 }
 
 // Verified reports whether this evidence raises its claim: the probe ran and
