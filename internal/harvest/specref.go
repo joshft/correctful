@@ -46,13 +46,13 @@ func isTestPath(rel string) bool {
 	return false
 }
 
-// underDotDir reports whether any component of the path is hidden. Hidden
+// UnderDotDir reports whether any component of the path is hidden. Hidden
 // directories hold vendored tooling and configuration (.correctless, .claude,
 // .github), not code the project ships — a repo with the methodology's tooling
 // INSTALLED would otherwise have the tooling's own identifiers harvested as the
 // project's claims. Measured on a real sweep: every one of 75 remainder entries
 // came from installed tooling under a dot-directory, zero from project code.
-func underDotDir(path string) bool {
+func UnderDotDir(path string) bool {
 	for _, part := range strings.Split(path, "/") {
 		if strings.HasPrefix(part, ".") {
 			return true
@@ -84,7 +84,7 @@ func (SpecRefHarvester) Harvest(repoDir string, files []string) (Result, error) 
 		if !isCodeFile(rel) {
 			continue // prose/catalog files list claims; they don't make them
 		}
-		if underDotDir(rel) {
+		if UnderDotDir(rel) {
 			continue // installed tooling makes its own claims, not this repo's
 		}
 		if isTestPath(rel) {

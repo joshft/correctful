@@ -61,7 +61,9 @@ func fixtureServer(t *testing.T, status int, body string) (*Client, *[]byte, *ht
 // TestExtractMintsValidatedProposals: valid proposals become probe-less
 // llm-proposed claims; a shape outside the taxonomy and a file outside the
 // diff are REJECTED, never repaired. The request pins the contract: model,
-// temperature 0, key header, and the diff itself in the prompt.
+// key header, and the diff itself in the prompt (temperature is omitted —
+// the API deprecated it for this model generation; fail-loud caught that
+// live).
 func TestExtractMintsValidatedProposals(t *testing.T) {
 	out := `[
 	  {"shape":"invariant","file":"pkg/gate/gate.go","text":"Check rejects nil input."},
@@ -101,8 +103,11 @@ func TestExtractMintsValidatedProposals(t *testing.T) {
 	if err := json.Unmarshal(*reqBody, &req); err != nil {
 		t.Fatal(err)
 	}
-	if req.Model != DefaultModel || req.Temperature != 0 {
-		t.Errorf("request model/temp = %q/%v", req.Model, req.Temperature)
+	if req.Model != DefaultModel {
+		t.Errorf("request model = %q", req.Model)
+	}
+	if strings.Contains(string(*reqBody), "temperature") {
+		t.Error("request carries temperature — deprecated for this model generation")
 	}
 	if !strings.Contains(req.Messages[0].Content, "diff --git a/pkg/gate/gate.go") {
 		t.Error("prompt does not carry the diff")
@@ -210,5 +215,25 @@ func TestSectionFileParsing(t *testing.T) {
 	}
 	if f := sectionFile(secs[1]); f != "docs/notes.md" {
 		t.Errorf("section 1 file = %q", f)
+	}
+}
+
+// TestDotDirSectionsNeverReachTheModel: hidden-directory sections (installed
+// tooling, methodology documents) are excluded from the prompt BEFORE the
+// byte cap is spent — measured live, dot-dir documents sorted first in a real
+// diff and consumed the entire cap, so the model never saw shipped code.
+func TestDotDirSectionsNeverReachTheModel(t *testing.T) {
+	patch := "diff --git a/.tooling/ARCH.md b/.tooling/ARCH.md\n--- a/.tooling/ARCH.md\n+++ b/.tooling/ARCH.md\n@@ -0,0 +1 @@\n+### INV-001: docs about the change\n" +
+		"diff --git a/pkg/gate.go b/pkg/gate.go\n--- a/pkg/gate.go\n+++ b/pkg/gate.go\n@@ -0,0 +1 @@\n+func Gate() {}\n"
+	client, reqBody, _ := fixtureServer(t, 200, apiFixture(`[]`))
+	res, err := Harvester{Patch: patch, Client: client}.Harvest("", []string{".tooling/ARCH.md", "pkg/gate.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Read) != 1 || res.Read[0] != "pkg/gate.go" {
+		t.Fatalf("read = %v, want only the shipped-code section", res.Read)
+	}
+	if strings.Contains(string(*reqBody), ".tooling/ARCH.md") {
+		t.Error("prompt carries a dot-dir section")
 	}
 }

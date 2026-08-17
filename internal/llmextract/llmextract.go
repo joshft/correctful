@@ -11,7 +11,7 @@
 // wrote down itself.
 //
 // Determinism discipline: pinned model (overridable via CORRECTFUL_LLM_MODEL),
-// temperature 0, a strict JSON output contract with schema validation, and
+// a strict JSON output contract with schema validation, and
 // proposals rejected — not repaired — when they name a file outside the diff
 // or a shape outside the taxonomy.
 package llmextract
@@ -39,6 +39,11 @@ const (
 	defaultBaseURL = "https://api.anthropic.com"
 	apiVersion     = "2023-06-01"
 	maxProposals   = 20
+	// maxOutputTokens leaves room for the model's reasoning: this model
+	// generation reasons before answering (measured live — 4096 truncated the
+	// answer mid-array, and the parse gate caught it), so the budget covers
+	// thinking plus the full proposal array.
+	maxOutputTokens = 16384
 	// maxPatchBytes bounds what the model reads. Truncation is DISCLOSED, not
 	// silent: only files whose diff sections were actually sent are reported
 	// as read, so the receipt's coverage shows exactly what the extractor saw.
@@ -110,6 +115,17 @@ func includedSections(patch string, files []string) (sections []string, read []s
 	}
 	total := 0
 	for _, sec := range splitSections(patch) {
+		if harvest.UnderDotDir(sectionFile(sec)) {
+			// The same principle every mechanical harvester applies: hidden
+			// directories hold installed tooling and its documentation, not
+			// the change's code. Measured live: without this, a change's
+			// dot-dir methodology documents sorted first in the diff and
+			// consumed the ENTIRE byte cap — the model never saw a line of
+			// shipped code and re-extracted the docs' claims instead
+			// (extraction-over-prose, the class the cap exists to feed code
+			// into, not documents).
+			continue
+		}
 		if len(sec) > maxPatchBytes {
 			continue // a section is sent whole or not at all — never truncated mid-hunk
 		}
@@ -266,10 +282,9 @@ func truncateStr(s string, n int) string {
 // --- Anthropic Messages API (stdlib only) ---
 
 type apiRequest struct {
-	Model       string       `json:"model"`
-	MaxTokens   int          `json:"max_tokens"`
-	Temperature float64      `json:"temperature"`
-	Messages    []apiMessage `json:"messages"`
+	Model     string       `json:"model"`
+	MaxTokens int          `json:"max_tokens"`
+	Messages  []apiMessage `json:"messages"`
 }
 
 type apiMessage struct {
@@ -282,7 +297,8 @@ type apiResponse struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	Error *struct {
+	StopReason string `json:"stop_reason"`
+	Error      *struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error"`
@@ -291,10 +307,9 @@ type apiResponse struct {
 // complete sends one user message and returns the concatenated text blocks.
 func (c *Client) complete(ctx context.Context, prompt string) (string, error) {
 	body, err := json.Marshal(apiRequest{
-		Model:       c.Model,
-		MaxTokens:   4096,
-		Temperature: 0,
-		Messages:    []apiMessage{{Role: "user", Content: prompt}},
+		Model:     c.Model,
+		MaxTokens: maxOutputTokens,
+		Messages:  []apiMessage{{Role: "user", Content: prompt}},
 	})
 	if err != nil {
 		return "", err
@@ -333,6 +348,9 @@ func (c *Client) complete(ctx context.Context, prompt string) (string, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API HTTP %d: %s", resp.StatusCode, truncateStr(string(data), 200))
+	}
+	if parsed.StopReason == "max_tokens" {
+		return "", fmt.Errorf("model output truncated at the %d-token budget (stop_reason max_tokens)", maxOutputTokens)
 	}
 	var out strings.Builder
 	for _, block := range parsed.Content {

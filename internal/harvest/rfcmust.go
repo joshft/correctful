@@ -54,7 +54,7 @@ func (RFCMustHarvester) Harvest(repoDir string, files []string) (Result, error) 
 		if !docExts[strings.ToLower(filepath.Ext(rel))] {
 			continue
 		}
-		if underDotDir(rel) {
+		if UnderDotDir(rel) {
 			continue // installed tooling and private dot-dirs are not the repo's spec
 		}
 		abs := filepath.Join(repoDir, rel)

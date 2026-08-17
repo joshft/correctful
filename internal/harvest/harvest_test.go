@@ -194,13 +194,13 @@ func TestINV004_SpecRefHarvestsCodeNotProse(t *testing.T) {
 	tooling := []string{".correctless/hooks/guard.sh", ".claude/x.sh", "a/.hidden/b.go", ".config.sh"}
 	shipped := []string{"scripts/build.sh", "pkg/a/b.go"}
 	for _, f := range tooling {
-		if !underDotDir(f) {
-			t.Errorf("underDotDir(%q) = false, want true", f)
+		if !UnderDotDir(f) {
+			t.Errorf("UnderDotDir(%q) = false, want true", f)
 		}
 	}
 	for _, f := range shipped {
-		if underDotDir(f) {
-			t.Errorf("underDotDir(%q) = true, want false", f)
+		if UnderDotDir(f) {
+			t.Errorf("UnderDotDir(%q) = true, want false", f)
 		}
 	}
 }

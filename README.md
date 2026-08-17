@@ -224,7 +224,7 @@ extractor buys is an honest remainder for changes that never stated their
 claims: "this change implicitly asserts X, Y, Z — none of it checked."
 
 Discipline: pinned model (`claude-sonnet-5`; `CORRECTFUL_LLM_MODEL`
-overrides), temperature 0, a strict JSON output contract that fails loudly on
+overrides), a strict JSON output contract that fails loudly on
 prose-wrapped output, and proposals rejected — never repaired — when they
 name a file outside the diff or a shape outside the taxonomy. The diff is
 capped at 150KB with truncation disclosed through coverage: only files whose
@@ -239,6 +239,22 @@ ANTHROPIC_API_KEY=... correctful -base auto -llm
 Verifying LLM proposals (binding them to probes) is a later increment, gated
 like every extractor before it: kept only if it raises verification without a
 false bind.
+
+Measured (first live runs, 2026-08): on a wild-case diff — a real 19-file
+change with zero pre-written claims — 19 of 20 proposals were accurate,
+concrete, and falsifiable, with zero hallucinated files or mechanisms; the
+one miss over-generalized a rule that real code scopes narrowly (a misreading,
+not an invention — and exactly the kind of claim a probe could refute). On a
+methodology-rich repo the first run exposed a real blind spot: the change's
+own dot-directory documentation sorted first in the diff and consumed the
+entire byte cap, so the model re-extracted the docs' claims and never saw
+shipped code. Hidden-directory sections are now excluded before the cap is
+spent — the same rule every mechanical harvester applies — after which all 20
+proposals were grounded in shipped code and user-facing docs, including CLI
+behavior no id-bound test states, and the most specific one checked exact
+against code down to the flag semantics. The parse gate also earned its keep
+live: it caught a truncated response (raising the token budget for a
+reasoning-model generation) and a deprecated request parameter, both loudly.
 
 ## Known limitations (found by dogfooding, stated honestly)
 
