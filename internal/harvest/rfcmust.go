@@ -40,10 +40,16 @@ var docExts = map[string]bool{".md": true, ".markdown": true, ".txt": true}
 //   - The RFC 2119 / BCP 14 interpretation boilerplate is never a claim: it
 //     declares the keywords, it doesn't use them.
 //
-// Clauses carry no probes in v0 — binding a MUST clause to a test is the
-// proof-carrying-binding increment, not a name trick. Every clause lands in
-// the remainder, which is the point: the receipt now states the normative
-// surface nothing checks instead of silently not knowing it exists.
+// Clauses carry no probes — and that is a MEASURED state, not a deferral.
+// Binding a clause to a test needs a join signal a test can mechanically
+// name; measured across every qualifying corpus, the one real RFC's 58
+// keyword clauses contain zero spec-ids and zero requirement labels, and a
+// fuzzy textual join would mint false bindings (the same class the
+// doc-comment binding was cut for). The bindable form is explicit clause
+// labels (R-007-style) named by tests — support lands when a corpus adopts
+// them. Until then every clause lands in the remainder, which is the point:
+// the receipt states the normative surface nothing checks instead of
+// silently not knowing it exists.
 type RFCMustHarvester struct{}
 
 func (RFCMustHarvester) Name() string { return "rfc-must" }

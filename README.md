@@ -347,6 +347,18 @@ than smoothed over:
   disclosed rather than hidden. Sentence extraction is heuristic (terminal
   punctuation + capitalization); the receipt quotes clauses verbatim, so a
   mis-split is visible in the receipt itself.
+- **MUST clauses have no probe-carrying path — measured, not neglected.**
+  Binding a clause to a test needs a join signal a test can mechanically
+  name. Measured across every qualifying corpus: the one real RFC's 58
+  keyword clauses contain zero spec identifiers and zero requirement labels,
+  only 5 carry a backticked code token, and that repository's tests are
+  shell/C infrastructure suites correctful has no runner for. A fuzzy
+  textual join would mint false bindings — the same class the doc-comment
+  binding was cut for — so clauses stay honestly in the remainder. The
+  bindable form is explicit: a document that labels its requirements
+  (`R-007`-style) with tests naming the label gets binding through the
+  existing test-name reconciliation; support lands when a corpus adopts
+  labels.
 
 ## Layout
 
