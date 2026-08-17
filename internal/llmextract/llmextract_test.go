@@ -289,3 +289,113 @@ func TestGithubSectionCannotCrowdOutCode(t *testing.T) {
 		t.Error("shipped-code sections missing")
 	}
 }
+
+// bindingPatch extends the sample with two changed test files (git's exact
+// framing; content synthetic): one new test, one deleted test, one context
+// test, and a name defined in BOTH test files (ambiguous).
+const bindingPatch = samplePatch + `diff --git a/pkg/gate/gate_test.go b/pkg/gate/gate_test.go
+index 5555555..6666666 100644
+--- a/pkg/gate/gate_test.go
++++ b/pkg/gate/gate_test.go
+@@ -1,8 +1,11 @@
+ package gate
+ 
++func TestCheckRejectsNil(t *testing.T) {
++	if Check(nil) {
++		t.Fatal("nil accepted")
++	}
++}
+-func TestGoneCheck(t *testing.T) {
+-	t.Skip()
+-}
+ func TestContextCheck(t *testing.T) {
+ 	_ = Check
+ }
++func TestDupName(t *testing.T) {
++	_ = Check
++}
+diff --git a/pkg/other/other_test.go b/pkg/other/other_test.go
+index 7777777..8888888 100644
+--- a/pkg/other/other_test.go
++++ b/pkg/other/other_test.go
+@@ -1,3 +1,6 @@
+ package other
+ 
++func TestDupName(t *testing.T) {
++	_ = 1
++}
+`
+
+// TestLLMEdgeExistenceGate: a proposal's "test" binds a go-test probe ONLY
+// when the diff itself proves the test exists — a changed _test.go defines it
+// on an added or context line, exactly one file defines it, and the claim's
+// file is shipped Go code. Every failing case mints the claim PROBE-LESS; the
+// claim itself is never rejected for a bad edge.
+func TestLLMEdgeExistenceGate(t *testing.T) {
+	sections := splitSections(bindingPatch)
+	readFiles := []string{"pkg/gate/gate.go", "pkg/gate/gate_test.go", "docs/notes.md"}
+	cases := []struct {
+		name      string
+		file      string
+		test      string
+		wantProbe string
+	}{
+		{"added test binds", "pkg/gate/gate.go", "TestCheckRejectsNil",
+			"go-test:pkg/gate/gate_test.go:TestCheckRejectsNil"},
+		{"context test binds", "pkg/gate/gate.go", "TestContextCheck",
+			"go-test:pkg/gate/gate_test.go:TestContextCheck"},
+		{"deleted test does not exist", "pkg/gate/gate.go", "TestGoneCheck", ""},
+		{"test absent from diff", "pkg/gate/gate.go", "TestNowhere", ""},
+		{"ambiguous across test files", "pkg/gate/gate.go", "TestDupName", ""},
+		{"non-go claim file unbindable", "docs/notes.md", "TestCheckRejectsNil", ""},
+		{"test-file claim unbindable", "pkg/gate/gate_test.go", "TestCheckRejectsNil", ""},
+		{"no test field", "pkg/gate/gate.go", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := fmt.Sprintf(`[{"shape":"assertion","file":%q,"text":"a claim.","test":%q}]`, tc.file, tc.test)
+			claims, err := mintProposals(raw, readFiles, sections)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(claims) != 1 {
+				t.Fatalf("claims = %d, want 1 (the claim survives a bad edge)", len(claims))
+			}
+			got := ""
+			if len(claims[0].ProbeIDs) == 1 {
+				got = claims[0].ProbeIDs[0]
+			}
+			if got != tc.wantProbe {
+				t.Errorf("probe = %q, want %q", got, tc.wantProbe)
+			}
+		})
+	}
+}
+
+// TestLLMEdgeFlowsThroughHarvest: the binding survives the full Harvest path
+// — fixture server, parse gate, minting — so a bound proposal reaches the
+// dispatcher with its probe attached and its llm-proposed source intact.
+func TestLLMEdgeFlowsThroughHarvest(t *testing.T) {
+	out := `[{"shape":"invariant","file":"pkg/gate/gate.go","text":"Check rejects nil input.","test":"TestCheckRejectsNil"}]`
+	client, _, _ := fixtureServer(t, 200, apiFixture(out))
+	h := Harvester{Patch: bindingPatch, Client: client}
+
+	res, err := h.Harvest("/nowhere", []string{"pkg/gate/gate.go", "pkg/gate/gate_test.go", "docs/notes.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Claims) != 1 {
+		t.Fatalf("claims = %d, want 1", len(res.Claims))
+	}
+	c := res.Claims[0]
+	if c.Source.Kind != schema.SourceLLM {
+		t.Errorf("source kind = %q, want llm", c.Source.Kind)
+	}
+	want := "go-test:pkg/gate/gate_test.go:TestCheckRejectsNil"
+	if len(c.ProbeIDs) != 1 || c.ProbeIDs[0] != want {
+		t.Errorf("probes = %v, want [%s]", c.ProbeIDs, want)
+	}
+	if !strings.Contains(extractionPrompt(splitSections(bindingPatch)), `"test"`) {
+		t.Errorf("prompt does not describe the optional test field")
+	}
+}

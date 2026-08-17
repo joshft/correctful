@@ -220,12 +220,14 @@ operationally: **the capped diff — your source changes — is transmitted to t
 Anthropic API.** Nothing else leaves the machine, and nothing at all does
 without the flag.
 
-The cardinal rule is structural here, not aspirational: **proposals carry no
-probes**, land in the remainder at T0, and are marked `[llm-proposed]` in
-every rendering — nothing the model says can raise a tier or produce a false
-pass. The worst a hallucinated claim can do is waste a remainder row. What the
-extractor buys is an honest remainder for changes that never stated their
-claims: "this change implicitly asserts X, Y, Z — none of it checked."
+The cardinal rule is structural here, not aspirational: **nothing the model
+says can, by itself, raise a tier or produce a false pass.** A proposal is
+minted probe-less, lands in the remainder at T0, and is marked
+`[llm-proposed]` in every rendering — verification included, so the
+provenance is never laundered away. The worst a hallucinated claim can do is
+waste a remainder row. What the extractor buys is an honest remainder for
+changes that never stated their claims: "this change implicitly asserts X,
+Y, Z — none of it checked."
 
 Discipline: pinned model (`claude-sonnet-5`; `CORRECTFUL_LLM_MODEL`
 overrides), a strict JSON output contract that fails loudly on
@@ -240,9 +242,43 @@ mechanical path, so the CI gate never depends on a model.
 ANTHROPIC_API_KEY=... correctful -base auto -llm
 ```
 
-Verifying LLM proposals (binding them to probes) is a later increment, gated
-like every extractor before it: kept only if it raises verification without a
-false bind.
+### Model-proposed edges (schema 0.0.8): proof-carrying binding for LLM claims
+
+Verifying LLM proposals is where the value loop closes — and where the trust
+risk concentrates: a wrong claim→test association plus a passing test would
+mint a false verification, the one failure mode the product exists to
+prevent. So the model is allowed to propose an EDGE, never to certify one.
+A proposal may name, in an optional `test` field, a changed Go test that
+directly checks the claim, and the edge must then survive two mechanical
+gates:
+
+1. **Existence, at mint time.** The named test's definition must appear in
+   the diff the model was shown — an added or context line of a changed
+   `_test.go` file (a deleted definition does not count: the test no longer
+   exists to run). Exactly one changed test file may define it (an ambiguous
+   name fails closed), and the claim's own file must be shipped Go code —
+   the target the second gate will check. A failed edge mints the claim
+   probe-less, exactly as before; the claim is never rejected for a bad
+   edge.
+2. **Execution, at run time.** The bound probe's run is instrumented for
+   coverage, and the pass counts for the LLM claim ONLY when the profile
+   shows execution reaching the claim's file (`binding: file-covered` — the
+   file-level analogue of the function-level coverage-proven binding that
+   annotated spec-id claims get; an LLM claim carries a file, never a line).
+   Fail-closed in both directions: a profile whose execution never touched
+   the file REFUTES the edge (`file-not-reached` — which says nothing about
+   the claim itself), and a pass with no profile at all raises nothing. The
+   remainder row discloses which gate discarded the pass.
+
+Refutation keeps its unconditional dominance: a failing test in the change
+blocks the gate no matter whose edge bound it — a mis-attributed refutation
+is fail-safe, because the failure itself is real. What the model's word can
+now reach, end to end: a remainder row becomes a T1 verified row exactly
+when a machine confirmed both that the named test exists in the change and
+that its execution demonstrably touches the code the claim is about — still
+not proof the test asserts the right property, and the receipt's
+`[llm-proposed]` marker plus `[binding: file-coverage-proven]` state
+precisely that trust boundary on the row itself.
 
 Measured (first live runs, 2026-08): on a wild-case diff — a real 19-file
 change with zero pre-written claims — 19 of 20 proposals were accurate,

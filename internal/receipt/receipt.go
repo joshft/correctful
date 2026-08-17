@@ -35,7 +35,7 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 		for j := range evs {
 			evs[j].Detail = sanitizePaths(evs[j].Detail, change.Repo)
 		}
-		status, tier := weigh(evs)
+		status, tier := weigh(c, evs)
 
 		res := schema.ClaimResult{
 			Claim:         c,
@@ -119,14 +119,40 @@ func bindingNote(res schema.ClaimResult) string {
 	nameOnly := false
 	for _, e := range res.Evidence {
 		switch e.Binding {
-		case "covered":
+		case schema.BindingCovered:
 			return "  [binding: coverage-proven]"
-		case "name-only":
+		case schema.BindingFileCovered:
+			return "  [binding: file-coverage-proven]"
+		case schema.BindingNameOnly:
 			nameOnly = true
 		}
 	}
 	if nameOnly {
 		return "  [binding: name-only]"
+	}
+	return ""
+}
+
+// llmEdgeNote discloses why a model-proposed edge did not count: the probe
+// passed but the pass raised nothing, either because the coverage gate
+// refuted the edge (execution never reached the claim's file) or because no
+// profile existed to confirm it. Rendered on remainder rows — the claim's
+// probe DID run, and silently rendering the row as "nothing checked" would
+// hide that a pass was discarded.
+func llmEdgeNote(res schema.ClaimResult) string {
+	if res.Claim.Source.Kind != schema.SourceLLM {
+		return ""
+	}
+	for _, e := range res.Evidence {
+		if !e.Verified() {
+			continue
+		}
+		switch e.Binding {
+		case schema.BindingFileNotReached:
+			return "  [llm edge rejected: the probe passed but never executed " + res.Claim.Source.File + "]"
+		case "":
+			return "  [llm edge unconfirmed: no coverage profile, so the pass raised nothing]"
+		}
 	}
 	return ""
 }
@@ -280,12 +306,20 @@ func scrubHost(s, host string) string {
 //     raises nothing); effective tier is the highest a passing probe
 //     conferred.
 //   - unverified: nothing ran that could raise the claim. Remainder.
-func weigh(evs []schema.Evidence) (schema.Status, schema.Tier) {
+//
+// For an LLM-PROPOSED claim, a pass additionally requires a coverage-confirmed
+// edge (Binding "file-covered"): the probe→claim tie is the model's word, so
+// the pass counts only when the probe's own execution demonstrably reached the
+// claim's file. Fail-closed — a pass with no profile, or one whose execution
+// never touched the file, raises nothing and the claim stays in the remainder
+// (llmEdgeNote discloses which). Refutation stays UNCONDITIONAL: a failing
+// probe in the change blocks the gate no matter whose edge bound it.
+func weigh(c schema.Claim, evs []schema.Evidence) (schema.Status, schema.Tier) {
 	best := schema.T0Unverified
 	anyVerified, anyRefuted := false, false
 	for _, e := range evs {
 		switch {
-		case e.Verified():
+		case e.Verified() && (c.Source.Kind != schema.SourceLLM || e.Binding == schema.BindingFileCovered):
 			anyVerified = true
 			if e.Tier > best {
 				best = e.Tier
@@ -346,8 +380,8 @@ func WriteText(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "VERIFIED")
 		for _, res := range r.Results {
 			if res.Status == schema.StatusVerified {
-				fmt.Fprintf(w, "  [%s] %s — %s%s%s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text,
-					anchorNote(res.Claim), bindingNote(res))
+				fmt.Fprintf(w, "  [%s] %s — %s%s%s%s\n", res.EffectiveTier, res.Claim.ID, res.Claim.Text,
+					anchorNote(res.Claim), llmNote(res.Claim), bindingNote(res))
 			}
 		}
 		fmt.Fprintln(w)
@@ -369,8 +403,8 @@ func WriteText(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "  (empty — every harvested claim reached a probe)")
 	}
 	for _, res := range r.Remainder {
-		fmt.Fprintf(w, "  %s — %s  [%s:%d]%s%s\n", res.Claim.ID, res.Claim.Text,
-			res.Claim.Source.File, res.Claim.Source.Line, anchorNote(res.Claim), llmNote(res.Claim))
+		fmt.Fprintf(w, "  %s — %s  [%s:%d]%s%s%s\n", res.Claim.ID, res.Claim.Text,
+			res.Claim.Source.File, res.Claim.Source.Line, anchorNote(res.Claim), llmNote(res.Claim), llmEdgeNote(res))
 	}
 
 	writeCoverage(w, r.Coverage)
