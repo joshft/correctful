@@ -105,7 +105,6 @@ func Run(repoDir string, files []string, harvesters ...Harvester) ([]schema.Clai
 	cov := schema.Coverage{Files: make([]schema.FileCoverage, 0, len(files))}
 	for _, f := range files {
 		fc := schema.FileCoverage{File: f, ReadBy: readBy[f], Claims: claimCount[f]}
-		cov.Files = append(cov.Files, fc)
 		switch {
 		case fc.Claims > 0:
 			cov.Claimed++
@@ -113,7 +112,19 @@ func Run(repoDir string, files []string, harvesters ...Harvester) ([]schema.Clai
 			cov.Scanned++
 		default:
 			cov.Unread++
+			// An unread file has one of two different stories, and merging
+			// them misleads: a hidden-path file was skipped by POLICY (every
+			// harvester treats hidden directories as installed tooling — a
+			// harvester for its format may well exist), while any other
+			// unread file is a CAPABILITY gap.
+			if UnderDotDir(f) {
+				fc.SkipReason = "hidden-path"
+				cov.UnreadPolicy++
+			} else {
+				fc.SkipReason = "no-harvester"
+			}
 		}
+		cov.Files = append(cov.Files, fc)
 	}
 	return DetectPairs(out), cov, nil
 }

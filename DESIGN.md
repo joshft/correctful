@@ -316,10 +316,15 @@ than smoothed over:
 - **Spec identifiers are not namespaced per project.** `AP-012` in one repo and
   `AP-012` in another are different invariants that share an id; receipts are
   per-repo today, so this only matters for a future cross-repo ledger.
-- **"Unread" merges two causes.** A file can be unread because no harvester
-  understands its format (a capability gap) or because policy excludes it
-  (hidden-directory tooling). The per-file JSON makes the cause inspectable;
-  the text histogram does not yet distinguish them.
+- **"Unread" had merged two causes — RESOLVED (schema 0.0.7).** A file can be
+  unread because no harvester understands its format (a capability gap) or
+  because policy excludes it (hidden-directory tooling). The two are now
+  separate disclosures: per-file `skip_reason` ("no-harvester" vs
+  "hidden-path"), an `unread_policy` summary count, and two distinct
+  histogram lines in every renderer. Found live on the first pre-push
+  dogfood install: a repo's tracked hidden documents rendered as "no
+  harvester for .md" when a markdown harvester exists — the cause was
+  policy, and the receipt now says so.
 - **Spec-id harvesting skips hidden directories.** Installed tooling under
   dot-directories (`.correctless/`, `.claude/`) carries the tooling's own
   identifiers; measured on a real sweep, all 75 remainder entries were tooling

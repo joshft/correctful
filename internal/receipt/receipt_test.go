@@ -197,9 +197,9 @@ func TestCoverageDisclosesUnreadFiles(t *testing.T) {
 	cov := schema.Coverage{
 		Files: []schema.FileCoverage{
 			{File: "formal/model.als", ReadBy: []string{"alloy"}, Claims: 17},
-			{File: "src/core.c"},
-			{File: "src/other.c"},
-			{File: "docs/spec.md"},
+			{File: "src/core.c", SkipReason: "no-harvester"},
+			{File: "src/other.c", SkipReason: "no-harvester"},
+			{File: "docs/spec.md"}, // no reason recorded: renders as a capability gap
 		},
 		Claimed: 1, Unread: 3,
 	}
@@ -212,6 +212,41 @@ func TestCoverageDisclosesUnreadFiles(t *testing.T) {
 	}
 	if !strings.Contains(out, ".c×2") || !strings.Contains(out, ".md×1") {
 		t.Errorf("unread extension histogram missing:\n%s", out)
+	}
+}
+
+// TestUnreadCausesRenderSeparately: "unread" merges two different stories —
+// a capability gap (no harvester for the format) and a policy skip (hidden
+// paths hold installed tooling). Both renderers must state them as separate
+// lines; merging them misleads (measured live: a repo's tracked hidden docs
+// rendered as "no harvester for .md" when a markdown harvester exists).
+func TestUnreadCausesRenderSeparately(t *testing.T) {
+	cov := schema.Coverage{
+		Files: []schema.FileCoverage{
+			{File: "data.bin", SkipReason: "no-harvester"},
+			{File: ".tooling/a.md", SkipReason: "hidden-path"},
+			{File: ".tooling/b.md", SkipReason: "hidden-path"},
+		},
+		Unread: 3, UnreadPolicy: 2,
+	}
+	r := Assemble(gitdiff.Change{}, nil, nil, cov)
+
+	for name, render := range map[string]func(*strings.Builder){
+		"markdown": func(b *strings.Builder) { WriteMarkdown(b, r) },
+		"text":     func(b *strings.Builder) { WriteText(b, r) },
+	} {
+		var b strings.Builder
+		render(&b)
+		out := b.String()
+		if !strings.Contains(out, "unread (no harvester for): .bin×1") {
+			t.Errorf("%s: capability line wrong:\n%s", name, out)
+		}
+		if !strings.Contains(out, "unread (policy — hidden paths hold installed tooling): .md×2") {
+			t.Errorf("%s: policy line wrong:\n%s", name, out)
+		}
+		if strings.Contains(out, "no harvester for): .md") {
+			t.Errorf("%s: policy-skipped files leaked into the capability line:\n%s", name, out)
+		}
 	}
 }
 
