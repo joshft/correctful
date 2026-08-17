@@ -492,3 +492,24 @@ func TestLLMVerifiedRowKeepsProvenance(t *testing.T) {
 		}
 	}
 }
+
+// TestReceiptCarriesToolVersion: the first chain field. Every receipt names
+// the build that produced it — "unknown" when the build carries no identity,
+// never empty — and both renderers show it beside the schema version.
+func TestReceiptCarriesToolVersion(t *testing.T) {
+	claims, evidence := sampleClaims()
+	r := Assemble(gitdiff.Change{BaseRef: "main", HeadRef: "wip"}, claims, evidence, schema.Coverage{})
+	if r.ToolVersion == "" {
+		t.Fatal("tool version empty — must be stated, or stated as unknown")
+	}
+	var text, md strings.Builder
+	WriteText(&text, r)
+	WriteMarkdown(&md, r)
+	want := "correctful " + r.ToolVersion
+	if !strings.Contains(text.String(), want) {
+		t.Errorf("text receipt lacks %q", want)
+	}
+	if !strings.Contains(md.String(), want) {
+		t.Errorf("markdown receipt lacks %q", want)
+	}
+}

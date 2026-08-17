@@ -374,9 +374,17 @@ type Coverage struct {
 // Receipt is the per-change output: what was claimed, what was verified, and —
 // the load-bearing part — the honest unverified remainder.
 type Receipt struct {
-	SchemaVersion string        `json:"schema_version"`
-	Change        ChangeRef     `json:"change"`
-	Results       []ClaimResult `json:"results"`
+	SchemaVersion string `json:"schema_version"`
+	// ToolVersion identifies the checker build that produced this receipt —
+	// module version plus VCS revision when the build carries them, so two
+	// receipts are comparable across time only when the harvesters and
+	// runners that produced them are known. One field covers every in-tree
+	// component (they ship in one binary); per-supplier versions arrive with
+	// the evidence-intake contract. "unknown" when the build carries no
+	// identity — stated, never guessed.
+	ToolVersion string        `json:"tool_version,omitempty"`
+	Change      ChangeRef     `json:"change"`
+	Results     []ClaimResult `json:"results"`
 	// Remainder is the subset of Results with Status == StatusUnverified,
 	// surfaced explicitly so a reader never has to derive it. This is the
 	// feature no other tool in the field ships.
@@ -386,4 +394,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.9"
+const SchemaVersion = "0.0.10"

@@ -11,7 +11,9 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
+	"sync"
 
 	"github.com/joshft/correctful/internal/gitdiff"
 	"github.com/joshft/correctful/schema"
@@ -59,6 +61,7 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 
 	return schema.Receipt{
 		SchemaVersion: schema.SchemaVersion,
+		ToolVersion:   toolVersion(),
 		Change: schema.ChangeRef{
 			// The receipt carries the repository NAME, never its location: a
 			// receipt is shareable, and external-tool details are scrubbed of
@@ -85,6 +88,45 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 		},
 	}
 }
+
+// toolVersion identifies this checker build from its own build info — the
+// first chain field: two receipts are comparable across time only when the
+// harvesters and runners that produced them are known. Module version plus
+// short VCS revision when the build is stamped (`go install` from a clone
+// stamps both; a dirty tree gains "+dirty"), "unknown" when the build
+// carries no identity — stated, never guessed.
+var toolVersion = sync.OnceValue(func() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	v := bi.Main.Version
+	rev, dirty := "", false
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if rev != "" && dirty {
+		rev += "+dirty"
+	}
+	switch {
+	case v != "" && rev != "":
+		return v + " " + rev
+	case v != "":
+		return v
+	case rev != "":
+		return rev
+	default:
+		return "unknown"
+	}
+})
 
 // anchoringSummary tallies the binding layer's resolution outcomes. Nil when
 // no claim carries an anchor — a repo without a definition corpus.
@@ -350,7 +392,7 @@ func WriteJSON(w io.Writer, r schema.Receipt) error {
 // every other tool hides.
 func WriteText(w io.Writer, r schema.Receipt) {
 	s := r.Summary
-	fmt.Fprintf(w, "correctful receipt (schema %s)\n", r.SchemaVersion)
+	fmt.Fprintf(w, "correctful receipt (schema %s%s)\n", r.SchemaVersion, toolNote(r))
 	fmt.Fprintf(w, "change: %s...%s%s", r.Change.BaseRef, r.Change.HeadRef, shaNote(r.Change))
 	if r.Change.Repo != "" {
 		fmt.Fprintf(w, "  [%s]", r.Change.Repo)
@@ -436,6 +478,15 @@ func writeCoverage(w io.Writer, cov schema.Coverage) {
 // renderer — one phrasing, no drift between the receipt's formats.
 func mentionNote(n int) string {
 	return fmt.Sprintf("%d spec-id mention(s) not minted as claims — the repo defines no spec-id corpus, so a reference has no possible referent", n)
+}
+
+// toolNote renders the producing build beside the schema version — shared by
+// both renderers so the chain field is visible wherever the receipt is read.
+func toolNote(r schema.Receipt) string {
+	if r.ToolVersion == "" {
+		return ""
+	}
+	return " · correctful " + r.ToolVersion
 }
 
 // detailOf picks the evidence detail a reader needs: for a refuted claim, the
