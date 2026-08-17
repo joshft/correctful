@@ -91,7 +91,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	if cov.SuppressedMentions > 0 {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", mentionNote(cov.SuppressedMentions))
 	}
-	fmt.Fprintf(w, "\n<sub>schema %s · exit gate: refuted claims block; the remainder informs, never fails</sub>\n", r.SchemaVersion)
+	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: refuted claims block; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r))
 }
 
 // mdCell makes text safe inside a markdown table cell.
