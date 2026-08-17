@@ -35,7 +35,21 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	if note := exclusionNote(r.Change.Excluded); note != "" {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", note)
 	}
+	if p := r.Policy; p != nil {
+		fmt.Fprintf(w, "<sub>policy: `%s` · %s · %d rule(s)%s</sub>\n", p.Path, short(p.Digest), p.Rules, exemptNote(p))
+	}
 	fmt.Fprintln(w)
+
+	if p := r.Policy; p != nil && len(p.Misses) > 0 {
+		fmt.Fprintln(w, "### 🚫 Policy misses — evidence floors not met")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "| File | What is missing | Rule |")
+		fmt.Fprintln(w, "|---|---|---|")
+		for _, m := range p.Misses {
+			fmt.Fprintf(w, "| `%s` | %s | %s |\n", mdCell(m.File), mdCell(m.Detail), mdCell(m.Rule))
+		}
+		fmt.Fprintln(w)
+	}
 
 	if s.Refuted > 0 {
 		fmt.Fprintln(w, "### ❌ Refuted — a probe ran and the claim did not hold")
@@ -91,7 +105,11 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	if cov.SuppressedMentions > 0 {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", mentionNote(cov.SuppressedMentions))
 	}
-	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: refuted claims block; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r))
+	gate := "refuted claims block"
+	if r.Policy != nil {
+		gate = "refuted claims and policy misses block"
+	}
+	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: %s; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r), gate)
 }
 
 // mdCell makes text safe inside a markdown table cell.

@@ -513,3 +513,38 @@ func TestReceiptCarriesToolVersion(t *testing.T) {
 		t.Errorf("markdown receipt lacks %q", want)
 	}
 }
+
+// TestPolicySectionRenders: a receipt carrying a policy shows the digest
+// beside the change, the misses in a gate-blocking section in BOTH
+// renderers, and the exit-gate line names the policy leg. A receipt with no
+// policy renders none of it — repos without a policy file are unchanged.
+func TestPolicySectionRenders(t *testing.T) {
+	claims, evidence := sampleClaims()
+	r := Assemble(gitdiff.Change{BaseRef: "main", HeadRef: "wip"}, claims, evidence, schema.Coverage{})
+
+	var noPolicy strings.Builder
+	WriteText(&noPolicy, r)
+	if strings.Contains(noPolicy.String(), "policy") {
+		t.Errorf("policy rendered without a policy file:\n%s", noPolicy.String())
+	}
+
+	r.Policy = &schema.PolicyResult{
+		Path: "correctful.json", Digest: "abcdef0123456789", Rules: 2, ExemptTestFiles: 1,
+		Misses: []schema.PolicyMiss{{File: "internal/auth/gate.go",
+			Rule: "auth-floor", Detail: "no verified claim ties to this file; floor is ≥T2-adversarial go-test-pair"}},
+	}
+	var text, md strings.Builder
+	WriteText(&text, r)
+	WriteMarkdown(&md, r)
+	for name, out := range map[string]string{"text": text.String(), "markdown": md.String()} {
+		for _, want := range []string{"abcdef012345", "2 rule(s)", "1 test file(s) exempt",
+			"internal/auth/gate.go", "no verified claim ties to this file", "auth-floor"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s receipt lacks %q:\n%s", name, want, out)
+			}
+		}
+	}
+	if !strings.Contains(md.String(), "refuted claims and policy misses block") {
+		t.Errorf("markdown exit-gate line does not name the policy leg")
+	}
+}
