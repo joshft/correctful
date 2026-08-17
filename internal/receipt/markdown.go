@@ -58,7 +58,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "|---|---|---|")
 		for _, res := range r.Remainder {
 			fmt.Fprintf(w, "| `%s` | %s | `%s:%d` |\n",
-				mdCell(res.Claim.ID), mdCell(res.Claim.Text+anchorNote(res.Claim)+llmNote(res.Claim)),
+				mdCell(res.Claim.ID), mdCell(res.Claim.Text+anchorNote(res.Claim)+llmNote(res.Claim)+llmEdgeNote(res)),
 				res.Claim.Source.File, res.Claim.Source.Line)
 		}
 	}
@@ -72,7 +72,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 			if res.Status == schema.StatusVerified {
 				fmt.Fprintf(w, "| %s | `%s` | %s |\n",
 					res.EffectiveTier, mdCell(res.Claim.ID),
-					mdCell(res.Claim.Text+anchorNote(res.Claim)+bindingNote(res)))
+					mdCell(res.Claim.Text+anchorNote(res.Claim)+llmNote(res.Claim)+bindingNote(res)))
 			}
 		}
 		fmt.Fprintln(w, "\n</details>")

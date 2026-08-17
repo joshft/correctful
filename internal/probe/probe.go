@@ -52,11 +52,13 @@ func NewDispatcher(concurrency int, runners ...Runner) *Dispatcher {
 // with Ran=false — recorded, not silently dropped. The remainder is computed
 // from what did not verify, so an unrunnable probe must leave a trace.
 func (d *Dispatcher) Dispatch(ctx context.Context, repoDir string, claims []schema.Claim) [][]schema.Evidence {
-	// Pre-pass: mark go-test probes whose claims carry code reference sites —
-	// those runs are instrumented for coverage so the attribution pass below
-	// can evaluate each edge's binding (see coverage.go).
+	// Pre-pass: mark go-test probes whose edges the attribution pass below
+	// must evaluate against a coverage profile — claims carrying code
+	// reference sites (function-level binding, see coverage.go) and
+	// LLM-proposed claims (file-level binding: a model-proposed edge COUNTS
+	// only when execution demonstrably reaches the claim's file).
 	for _, c := range claims {
-		if !hasGoRefSite(c) {
+		if !hasGoRefSite(c) && c.Source.Kind != schema.SourceLLM {
 			continue
 		}
 		for _, pid := range c.ProbeIDs {
@@ -112,10 +114,17 @@ func (d *Dispatcher) Dispatch(ctx context.Context, repoDir string, claims []sche
 			ev := *results[pid]
 			ev.ClaimID = c.ID
 			// Binding is a property of the EDGE: the shared execution's
-			// profile is evaluated against THIS claim's reference sites.
+			// profile is evaluated against THIS claim's own targets —
+			// reference sites for annotated claims, the claim's file for
+			// model-proposed edges. No profile means no binding statement,
+			// which for an LLM edge fails closed at weighing.
 			if ev.Ran {
 				if p, ok := covProfiles.Load(pid); ok {
-					ev.Binding = bindingFor(repoDir, c.RefSites, p.(covProfile))
+					if c.Source.Kind == schema.SourceLLM {
+						ev.Binding = fileBindingFor(p.(covProfile), c.Source.File)
+					} else {
+						ev.Binding = bindingFor(repoDir, c.RefSites, p.(covProfile))
+					}
 				}
 			}
 			out[i][j] = ev

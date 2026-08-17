@@ -421,3 +421,74 @@ func TestDetailSanitizationIsCategorical(t *testing.T) {
 		t.Errorf("short-hostname guard failed: %q", got)
 	}
 }
+
+// llmClaim is a bound LLM proposal for the edge-gate tests.
+func llmClaim() schema.Claim {
+	return schema.Claim{
+		ID: "LLM:pkg/gate.go:0a1b2c3d", Shape: schema.ShapeAssertion,
+		Text:     "the gate rejects nil",
+		Source:   schema.Source{Kind: schema.SourceLLM, File: "pkg/gate.go", Line: 0, Ref: "llm"},
+		ProbeIDs: []string{"go-test:pkg/gate_test.go:TestGateRejectsNil"},
+	}
+}
+
+func llmEvidence(passed bool, binding string) [][]schema.Evidence {
+	return [][]schema.Evidence{{{
+		ClaimID: "LLM:pkg/gate.go:0a1b2c3d", ProbeID: "go-test:pkg/gate_test.go:TestGateRejectsNil",
+		Tier: schema.T1Assertion, Ran: true, Passed: passed, Binding: binding,
+	}}}
+}
+
+// TestLLMPassCountsOnlyWithConfirmedEdge: the fail-closed gate on
+// model-proposed edges. A pass verifies ONLY with binding "file-covered";
+// a pass whose edge was refuted by coverage, or never confirmed at all,
+// raises nothing and the remainder row says which. Refutation stays
+// unconditional — a failing probe blocks regardless of the edge.
+func TestLLMPassCountsOnlyWithConfirmedEdge(t *testing.T) {
+	cases := []struct {
+		name       string
+		passed     bool
+		binding    string
+		wantStatus schema.Status
+		wantNote   string
+	}{
+		{"confirmed edge verifies", true, schema.BindingFileCovered, schema.StatusVerified, ""},
+		{"refuted edge stays remainder", true, schema.BindingFileNotReached, schema.StatusUnverified, "llm edge rejected"},
+		{"unconfirmed edge stays remainder", true, "", schema.StatusUnverified, "llm edge unconfirmed"},
+		{"failing probe refutes regardless", false, "", schema.StatusRefuted, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Assemble(gitdiff.Change{BaseRef: "main", HeadRef: "wip"},
+				[]schema.Claim{llmClaim()}, llmEvidence(tc.passed, tc.binding), schema.Coverage{})
+			if got := r.Results[0].Status; got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			var text strings.Builder
+			WriteText(&text, r)
+			if tc.wantNote != "" && !strings.Contains(text.String(), tc.wantNote) {
+				t.Errorf("text receipt lacks %q:\n%s", tc.wantNote, text.String())
+			}
+		})
+	}
+}
+
+// TestLLMVerifiedRowKeepsProvenance: a verified LLM claim must still be
+// recognizable as model-proposed, in BOTH renderers — verification must not
+// launder the provenance away — and the confirmed edge is stated beside it.
+func TestLLMVerifiedRowKeepsProvenance(t *testing.T) {
+	r := Assemble(gitdiff.Change{BaseRef: "main", HeadRef: "wip"},
+		[]schema.Claim{llmClaim()}, llmEvidence(true, schema.BindingFileCovered), schema.Coverage{})
+
+	var text, md strings.Builder
+	WriteText(&text, r)
+	WriteMarkdown(&md, r)
+	for name, out := range map[string]string{"text": text.String(), "markdown": md.String()} {
+		if !strings.Contains(out, "[llm-proposed]") {
+			t.Errorf("%s verified row lost llm provenance:\n%s", name, out)
+		}
+		if !strings.Contains(out, "[binding: file-coverage-proven]") {
+			t.Errorf("%s verified row lacks the edge statement:\n%s", name, out)
+		}
+	}
+}

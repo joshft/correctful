@@ -63,6 +63,10 @@ func Unrelated() int { return 1 }
 // INV-901 lives on a const, outside any function: not checkable.
 const RefOnConst = "INV-901"
 `,
+		"other.go": `package covmod
+
+func Other() int { return 2 }
+`,
 		"gate_test.go": `package covmod
 
 import "testing"
@@ -76,6 +80,12 @@ func TestINV900_GateRejectsNil(t *testing.T) {
 func TestINV900_NameOnlyNeverCallsGate(t *testing.T) {
 	if Unrelated() != 1 {
 		t.Fatal("unrelated broke")
+	}
+}
+
+func TestOnlyOther(t *testing.T) {
+	if Other() != 2 {
+		t.Fatal("other broke")
 	}
 }
 `,
@@ -124,5 +134,59 @@ func TestCoverageProvenBinding(t *testing.T) {
 	}
 	if b := evidence[1][0].Binding; b != "" {
 		t.Errorf("const-site claim binding = %q, want none (annotation not in any function)", b)
+	}
+}
+
+// TestFileBindingFor: the file-level evaluator for model-proposed edges.
+// Executed blocks anywhere in the file confirm the edge; a file whose blocks
+// all read zero — or one the profile does not know — refutes it.
+func TestFileBindingFor(t *testing.T) {
+	prof := parseCoverProfile(realProfileSnippet)
+	if got := fileBindingFor(prof, "cmd/tool/cmd_config.go"); got != schema.BindingFileCovered {
+		t.Errorf("executed file = %q, want %q", got, schema.BindingFileCovered)
+	}
+	if got := fileBindingFor(prof, "pkg/other/other.go"); got != schema.BindingFileNotReached {
+		t.Errorf("zero-count file = %q, want %q", got, schema.BindingFileNotReached)
+	}
+	if got := fileBindingFor(prof, "pkg/unknown/nope.go"); got != schema.BindingFileNotReached {
+		t.Errorf("unknown file = %q, want %q", got, schema.BindingFileNotReached)
+	}
+}
+
+// TestLLMEdgeFileBinding: end-to-end through the dispatcher. An LLM-proposed
+// claim has no reference sites, yet its probe run IS instrumented (the
+// pre-pass marks SourceLLM claims) and the edge is evaluated at file
+// granularity against the claim's own file: the test that executes gate.go
+// confirms the edge; the test that only touches other.go refutes it. The
+// VERDICTS stay untouched — both probes pass; only the edge differs.
+func TestLLMEdgeFileBinding(t *testing.T) {
+	dir := writeCovModule(t)
+	pReaches := schema.GoTestProbeID("gate_test.go", "TestINV900_GateRejectsNil")
+	pElsewhere := schema.GoTestProbeID("gate_test.go", "TestOnlyOther")
+
+	claims := []schema.Claim{
+		{ID: "LLM:gate.go:aaaa", Shape: schema.ShapeAssertion, Text: "gate rejects nil",
+			Source:   schema.Source{Kind: schema.SourceLLM, File: "gate.go", Ref: "llm"},
+			ProbeIDs: []string{pReaches}},
+		{ID: "LLM:gate.go:bbbb", Shape: schema.ShapeAssertion, Text: "a claim its named test never touches",
+			Source:   schema.Source{Kind: schema.SourceLLM, File: "gate.go", Ref: "llm"},
+			ProbeIDs: []string{pElsewhere}},
+	}
+	evidence := NewDispatcher(2, GoTestRunner{}).Dispatch(context.Background(), dir, claims)
+
+	if len(evidence) != 2 || len(evidence[0]) != 1 || len(evidence[1]) != 1 {
+		t.Fatalf("evidence shape = %v", evidence)
+	}
+	confirmed, refutedEdge := evidence[0][0], evidence[1][0]
+	if !confirmed.Ran || !confirmed.Passed || !refutedEdge.Ran || !refutedEdge.Passed {
+		t.Fatalf("verdicts degraded by instrumentation: %+v / %+v", confirmed, refutedEdge)
+	}
+	if confirmed.Binding != schema.BindingFileCovered {
+		t.Errorf("edge into executed file = %q, want %q (detail %q)",
+			confirmed.Binding, schema.BindingFileCovered, confirmed.Detail)
+	}
+	if refutedEdge.Binding != schema.BindingFileNotReached {
+		t.Errorf("edge into untouched file = %q, want %q",
+			refutedEdge.Binding, schema.BindingFileNotReached)
 	}
 }

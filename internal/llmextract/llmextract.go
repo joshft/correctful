@@ -3,12 +3,17 @@
 // implicitly — the wild case, where nobody wrote a test name, a spec id, or a
 // MUST clause for the checker to harvest.
 //
-// The cardinal rule is structural here, not aspirational: proposed claims are
-// minted with NO probes, so they land in the receipt's remainder at T0 and
-// nothing the model says can raise a tier or produce a false pass. The worst
-// a hallucinated claim can do is waste a remainder row, and every proposal is
-// marked llm-proposed so a reader never mistakes it for something the change
-// wrote down itself.
+// The cardinal rule is structural here, not aspirational: nothing the model
+// says can, BY ITSELF, raise a tier or produce a false pass. A proposed claim
+// is minted probe-less and lands in the remainder — unless the model also
+// names a changed test that checks it, and that EDGE survives two mechanical
+// gates: the test must exist in the diff (a changed _test.go function, found
+// by parsing the sections the model was shown), and at run time the probe's
+// own coverage profile must show execution reaching the claim's file. An edge
+// that fails either gate binds nothing or verifies nothing; the receipt
+// discloses which gate rejected it. The worst a hallucinated claim can do is
+// waste a remainder row, and every proposal is marked llm-proposed so a
+// reader never mistakes it for something the change wrote down itself.
 //
 // Determinism discipline: pinned model (overridable via CORRECTFUL_LLM_MODEL),
 // a strict JSON output contract with schema validation, and
@@ -24,6 +29,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -98,7 +104,7 @@ func (h Harvester) Harvest(repoDir string, files []string) (harvest.Result, erro
 	if err != nil {
 		return harvest.Result{}, fmt.Errorf("llm extraction: %w", err)
 	}
-	claims, err := mintProposals(raw, read)
+	claims, err := mintProposals(raw, read, sent)
 	if err != nil {
 		return harvest.Result{}, fmt.Errorf("llm extraction: %w", err)
 	}
@@ -177,11 +183,13 @@ func sectionFile(sec string) string {
 	return ""
 }
 
-// proposal is the model's required output element.
+// proposal is the model's required output element. Test is optional: the name
+// of a changed Go test function that directly checks the claim.
 type proposal struct {
 	Shape string `json:"shape"`
 	File  string `json:"file"`
 	Text  string `json:"text"`
+	Test  string `json:"test"`
 }
 
 // allowedShapes is the claim taxonomy the model may use — anything else is
@@ -206,9 +214,10 @@ Rules:
 2. Write each claim as one plain declarative sentence about the changed code.
 3. Attribute each claim to the single changed file it is most about, using the exact path shown in the diff.
 4. Propose at most ` + fmt.Sprint(maxProposals) + ` claims — the most load-bearing ones. If the diff supports fewer, return fewer. Do not invent claims the diff does not support.
+5. If a Go test function CHANGED IN THIS DIFF directly checks a claim, add its exact function name in a "test" field. Only name a test whose definition appears in the diff. Omit the field when no changed test checks the claim or you are not sure.
 
 Output: a JSON array only — no prose, no code fences. Each element:
-{"shape": "<one of: assertion, invariant, must-clause, coupled-fields-lockstep, safety-assert, witness>", "file": "<changed file path>", "text": "<one sentence>"}
+{"shape": "<one of: assertion, invariant, must-clause, coupled-fields-lockstep, safety-assert, witness>", "file": "<changed file path>", "text": "<one sentence>", "test": "<optional: TestXxx changed in this diff>"}
 
 The diff:
 
@@ -222,14 +231,23 @@ The diff:
 	return b.String()
 }
 
-// mintProposals validates the model's output and mints probe-less claims.
-// Malformed output fails LOUDLY — a parse gate, not a salvage operation; the
-// only tolerated wrapper is a markdown code fence.
-func mintProposals(raw string, readFiles []string) ([]schema.Claim, error) {
+// mintProposals validates the model's output and mints claims. Malformed
+// output fails LOUDLY — a parse gate, not a salvage operation; the only
+// tolerated wrapper is a markdown code fence.
+//
+// A proposal naming a "test" binds a go-test probe ONLY when the existence
+// gate passes: the test's definition appears in the diff sections the model
+// was shown (deleted definitions do not count), exactly one changed _test.go
+// file defines it, and the claim's own file is a non-test Go file — the
+// target the run-time coverage gate will check execution against. A binding
+// that fails any of these mints the claim probe-less, exactly as before; the
+// CLAIM is never rejected for a bad edge.
+func mintProposals(raw string, readFiles []string, sections []string) ([]schema.Claim, error) {
 	inRead := make(map[string]bool, len(readFiles))
 	for _, f := range readFiles {
 		inRead[f] = true
 	}
+	testDefs := testDefsInSections(sections)
 	var props []proposal
 	if err := json.Unmarshal([]byte(stripFences(raw)), &props); err != nil {
 		return nil, fmt.Errorf("model output is not the required JSON array: %v (output begins %q)", err, truncateStr(raw, 120))
@@ -245,6 +263,12 @@ func mintProposals(raw string, readFiles []string) ([]schema.Claim, error) {
 		if len(claims) == maxProposals {
 			break
 		}
+		var probes []string
+		if name := strings.TrimSpace(p.Test); name != "" {
+			if file, ok := testDefs[name]; ok && file != "" && isBindableClaimFile(p.File) {
+				probes = []string{schema.GoTestProbeID(file, name)}
+			}
+		}
 		claims = append(claims, schema.Claim{
 			// The id hashes the proposal's content, so it is stable across
 			// reorderings and re-runs of the same proposal — an ordinal would
@@ -257,11 +281,50 @@ func mintProposals(raw string, readFiles []string) ([]schema.Claim, error) {
 				File: p.File,
 				Ref:  "llm",
 			},
-			// No probes, by design: a proposal is remainder-bound until a
-			// machine verifies it.
+			// A model-proposed probe binding is an EDGE PROPOSAL, not
+			// verification: at run time the probe only counts for this claim
+			// when its coverage profile shows execution reaching Source.File
+			// (see probe.Dispatch and receipt weighing). Probe-less remains
+			// the default: a proposal is remainder-bound until a machine
+			// verifies it.
+			ProbeIDs: probes,
 		})
 	}
 	return claims, nil
+}
+
+// isBindableClaimFile reports whether a claim file is a target the coverage
+// gate can check: shipped Go code, not a test file.
+func isBindableClaimFile(f string) bool {
+	return strings.HasSuffix(f, ".go") && !strings.HasSuffix(f, "_test.go")
+}
+
+// testDefRe matches a top-level Go test function definition on an added or
+// context diff line (leading '+' or ' '). A deleted definition ('-') must not
+// match: the test no longer exists to run.
+var testDefRe = regexp.MustCompile(`(?m)^[+ ]func (Test[A-Za-z0-9_]*)\s*\(`)
+
+// testDefsInSections maps each Go test function name defined in a changed
+// _test.go section to that section's file. A name defined in MORE than one
+// changed test file maps to "" — ambiguous, so the existence gate fails
+// closed rather than guessing which package the model meant.
+func testDefsInSections(sections []string) map[string]string {
+	defs := map[string]string{}
+	for _, sec := range sections {
+		file := sectionFile(sec)
+		if !strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		for _, m := range testDefRe.FindAllStringSubmatch(sec, -1) {
+			name := m[1]
+			if prev, seen := defs[name]; seen && prev != file {
+				defs[name] = ""
+				continue
+			}
+			defs[name] = file
+		}
+	}
+	return defs
 }
 
 // fnv32 is FNV-1a over the string — a stable content id, not a security hash.

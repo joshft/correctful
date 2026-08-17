@@ -18,8 +18,9 @@ Three rules control the receipt:
 
 - **A refuted claim stops the merge.** One failed probe is stronger than many
   passed probes.
-- **Only a machine can verify a claim.** An LLM can propose a claim. A
-  proposal cannot increase a tier.
+- **Only a machine can verify a claim.** An LLM can propose a claim, and it
+  can point to a changed test. The pass counts only when coverage data shows
+  that the test runs the claim's file.
 - **The receipt always shows the remainder**, also when the remainder is
   empty. The receipt also shows its own blind spots: the files that no
   harvester read, and the files that the scope excluded.
@@ -86,7 +87,8 @@ remainder is a report, not a defect.
 
 Note: The `-llm` option sends the capped diff — your source changes — to the
 Anthropic API. The option needs `ANTHROPIC_API_KEY`. Without the option, no
-data goes out from your machine. LLM proposals stay in the remainder at T0.
+data goes out from your machine. An LLM proposal stays in the remainder,
+unless a coverage-checked test in the change verifies it.
 
 ## The merge gate
 
@@ -112,7 +114,7 @@ This repository uses this gate for each of its own pull requests.
 | an Alloy `run` | a witness claim (a pass shows that the model is consistent) | the Alloy result file | T3 |
 | spec ids in shipped code (`INV-…`, `AP-…`, …) | a reference claim, anchored to its definition | id-named tests, with coverage proof | — |
 | MUST clauses in a normative document | a must-clause claim | no probe is available — the claim stays in the remainder | T0 |
-| nothing (`-llm`) | LLM proposals, with the mark `[llm-proposed]` | no probe, by design | T0 |
+| nothing (`-llm`) | LLM proposals, with the mark `[llm-proposed]` | a changed test, only when the model names it and coverage confirms the link | T0 or T1 |
 
 The tiers: **T0** unverified · **T1** one assertion held · **T2** an
 accept/reject pair held · **T3** property or model check · **T4** proof,

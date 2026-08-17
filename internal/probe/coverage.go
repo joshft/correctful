@@ -153,14 +153,30 @@ func bindingFor(repoDir string, refSites []schema.Source, prof covProfile) strin
 		checkable = true
 		for _, b := range blocks {
 			if b.count > 0 && b.startLine <= enclosing.bodyEnd && b.endLine >= enclosing.bodyStart {
-				return "covered"
+				return schema.BindingCovered
 			}
 		}
 	}
 	if checkable {
-		return "name-only"
+		return schema.BindingNameOnly
 	}
 	return ""
+}
+
+// fileBindingFor evaluates a model-proposed edge at file granularity: did the
+// probe's execution reach the claim's file at all? Weaker than the
+// function-level check — an LLM claim carries a file, never a line — but
+// mechanical, and it is the gate that lets a model-proposed edge count:
+// "file-covered" when any block of the file executed, "file-not-reached"
+// when the instrumented run never touched it (including a file the profile
+// does not know, which with -coverpkg=./... means it was not built in).
+func fileBindingFor(prof covProfile, relFile string) string {
+	for _, b := range profileBlocksFor(prof, relFile) {
+		if b.count > 0 {
+			return schema.BindingFileCovered
+		}
+	}
+	return schema.BindingFileNotReached
 }
 
 // profileBlocksFor finds the profile entry whose import-qualified path ends

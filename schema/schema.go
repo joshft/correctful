@@ -181,16 +181,33 @@ type Evidence struct {
 	Detail   string `json:"detail,omitempty"`
 	Duration string `json:"duration,omitempty"`
 	// Binding states how strongly this probe is tied to THIS claim — the
-	// second rung of proof-carrying binding, orthogonal to the tier.
-	// "covered": the probe's execution demonstrably reached the enclosing
-	// function of a code site naming the claim's id — proof the test
-	// exercises the annotated region (still not proof it asserts the right
-	// property). "name-only": the binding was checked and NO annotated region
-	// was reached — the tie between this probe and this claim is the name
-	// alone. Empty: no coverage check applied (no code sites, or the probe
-	// kind has no prover yet).
+	// second rung of proof-carrying binding, orthogonal to the tier. See the
+	// Binding* constants for the vocabulary. Empty: no coverage check applied
+	// (no code sites, or the probe kind has no prover yet).
 	Binding string `json:"binding,omitempty"`
 }
+
+// Binding values — how a probe→claim edge was checked. The first two apply to
+// claims whose id is annotated in shipped code (RefSites); the file-level pair
+// applies to LLM-proposed edges, where the claim carries a file but no line.
+const (
+	// BindingCovered: the probe's execution demonstrably reached the
+	// enclosing function of a code site naming the claim's id — proof the
+	// test exercises the annotated region (still not proof it asserts the
+	// right property).
+	BindingCovered = "covered"
+	// BindingNameOnly: the binding was checked and NO annotated region was
+	// reached — the tie between this probe and this claim is the name alone.
+	BindingNameOnly = "name-only"
+	// BindingFileCovered: the probe's execution demonstrably reached the file
+	// the claim is about. The file-level analogue of BindingCovered, used for
+	// model-proposed edges: it is what makes such an edge count at all.
+	BindingFileCovered = "file-covered"
+	// BindingFileNotReached: the probe ran instrumented and its execution
+	// never reached the claim's file — the proposed edge is refuted as an
+	// edge (which says nothing about the claim itself).
+	BindingFileNotReached = "file-not-reached"
+)
 
 // Verified reports whether this evidence raises its claim: the probe ran,
 // passed, AND confers a tier above T0. A pass at T0 confers nothing — T0 IS
@@ -342,4 +359,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.7"
+const SchemaVersion = "0.0.8"
