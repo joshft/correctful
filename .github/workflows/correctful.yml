@@ -40,7 +40,12 @@ jobs:
           cat receipt.md
           cat receipt.md >> "$GITHUB_STEP_SUMMARY"
 
+      # The comment is a delivery channel, not the contract: the Gate step
+      # carries the verdict, and the receipt is also in the job summary and
+      # log. A GitHub API outage here must not fail a clean receipt (measured:
+      # a GraphQL 503 failed the job before the Gate step ever ran).
       - name: Post or update PR comment
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}

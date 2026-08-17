@@ -119,6 +119,43 @@ func TestT0PassConfersNoVerification(t *testing.T) {
 	}
 }
 
+// TestScopeExclusionsAndInputDigestAreDisclosed: the change resolver's
+// deliberate scope cuts never reach the harvest, so BOTH renderers must state
+// them at the scope boundary itself; the input digest joins the SHA pins so a
+// dirty-tree receipt is identifiable.
+func TestScopeExclusionsAndInputDigestAreDisclosed(t *testing.T) {
+	r := Assemble(gitdiff.Change{
+		BaseRef: "main", HeadRef: "wip",
+		Excluded: []gitdiff.Exclusion{
+			{Reason: "untracked-territory", Count: 2136, Dirs: []string{"toolcache"}},
+			{Reason: "untracked-hidden", Count: 3},
+		},
+		InputDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}, nil, nil, schema.Coverage{})
+
+	for name, render := range map[string]func(*strings.Builder){
+		"markdown": func(b *strings.Builder) { WriteMarkdown(b, r) },
+		"text":     func(b *strings.Builder) { WriteText(b, r) },
+	} {
+		var b strings.Builder
+		render(&b)
+		out := b.String()
+		if !strings.Contains(out, "2136 untracked file(s) in never-tracked top-level trees (toolcache)") {
+			t.Errorf("%s receipt omits the territory exclusion:\n%s", name, out)
+		}
+		if !strings.Contains(out, "3 hidden untracked file(s)") {
+			t.Errorf("%s receipt omits the hidden exclusion:\n%s", name, out)
+		}
+		if !strings.Contains(out, "input:0123456789ab") {
+			t.Errorf("%s receipt omits the input digest pin:\n%s", name, out)
+		}
+	}
+
+	if r.Change.Excluded[0].Count != 2136 || r.Change.InputDigest == "" {
+		t.Fatalf("schema mapping dropped exclusion data: %+v", r.Change)
+	}
+}
+
 // TestSuppressedMentionsAreDisclosed: when the premise gate drops spec-id
 // mentions (no definition corpus), BOTH renderers state the suppression —
 // removing remainder rows silently would be the exact dishonesty the
