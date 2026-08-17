@@ -61,6 +61,28 @@ commit publishes the secret it removes.
 - The schema (`schema/`) is the payload; changes to it are versioned
   (`SchemaVersion`) and deliberate.
 
+## Language for reports and replies
+
+Write all reports, replies, and responses in ASD-STE100 Simplified Technical
+English. This section obeys its own rule.
+
+- Use the active voice.
+- Write short sentences. Use a maximum of 20 words in an instruction. Use a
+  maximum of 25 words in a description.
+- Give only one instruction in each sentence.
+- Use a word only with one meaning. Do not use a different word for the same
+  thing.
+- Use the simple present, simple past, or simple future tense. Do not use
+  complex tenses.
+- Do not use idioms, metaphors, or slang.
+- Use the project terms (receipt, claim, probe, remainder, tier, harvest) as
+  technical names.
+- Put important warnings first.
+
+This rule applies to reports, replies, and responses only. Commit messages,
+pull-request bodies, code comments, and documentation keep the conventions
+above.
+
 ## How changes land
 
 correctful is dogfooded on itself: every change lands through a pull request,
