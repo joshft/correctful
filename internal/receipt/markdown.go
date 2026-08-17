@@ -30,7 +30,8 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		fmt.Fprintf(w, "Anchoring: %d of %d spec-id claims resolved to definitions · %d ambiguous · %d orphan\n\n",
 			a.Resolved, a.SpecIDClaims, a.Ambiguous, a.Orphan)
 	}
-	fmt.Fprintf(w, "Change: `%s...%s` — %d files\n\n", r.Change.BaseRef, r.Change.HeadRef, len(r.Change.Files))
+	fmt.Fprintf(w, "Change: `%s...%s`%s — %d files\n\n", r.Change.BaseRef, r.Change.HeadRef,
+		mdCell(shaNote(r.Change)), len(r.Change.Files))
 
 	if s.Refuted > 0 {
 		fmt.Fprintln(w, "### ❌ Refuted — a probe ran and the claim did not hold")

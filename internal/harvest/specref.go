@@ -31,6 +31,21 @@ func isCodeFile(path string) bool {
 	return codeExts[strings.ToLower(filepath.Ext(path))]
 }
 
+// isTestPath reports whether a file is test code or test data by Go
+// convention (_test.go, testdata/). Other languages' conventions are added as
+// dogfooding measures their noise, not preemptively.
+func isTestPath(rel string) bool {
+	if strings.HasSuffix(rel, "_test.go") {
+		return true
+	}
+	for _, part := range strings.Split(rel, "/") {
+		if part == "testdata" {
+			return true
+		}
+	}
+	return false
+}
+
 // underDotDir reports whether any component of the path is hidden. Hidden
 // directories hold vendored tooling and configuration (.correctless, .claude,
 // .github), not code the project ships — a repo with the methodology's tooling
@@ -71,6 +86,14 @@ func (SpecRefHarvester) Harvest(repoDir string, files []string) (Result, error) 
 		}
 		if underDotDir(rel) {
 			continue // installed tooling makes its own claims, not this repo's
+		}
+		if isTestPath(rel) {
+			// A test file naming an id is either a name-bound test (the test
+			// harvesters mint that claim properly) or fixture content — not a
+			// SHIPPED-code claim. Measured on a self-sweep: scanning test
+			// files filled the remainder with fixture identifiers, which
+			// weakens the remainder's credibility without adding a claim.
+			continue
 		}
 		abs := filepath.Join(repoDir, rel)
 		info, err := os.Stat(abs)

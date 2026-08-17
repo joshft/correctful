@@ -87,7 +87,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, repoDir string, claims []sche
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				*slot = r.Run(ctx, repoDir, c, pid)
+				got := r.Run(ctx, repoDir, c, pid)
+				// Tier-as-probe-property is load-bearing, so the dispatcher
+				// ENFORCES it rather than trusting each runner's bookkeeping:
+				// no evidence may exceed its runner's declared maximum.
+				if got.Tier > r.MaxTier() {
+					got.Tier = r.MaxTier()
+				}
+				*slot = got
 			}(c, pid, runner, ev)
 		}
 	}

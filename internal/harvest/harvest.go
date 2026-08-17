@@ -2,9 +2,10 @@
 // HARVESTS the claims that are already written into them — test names, spec
 // identifiers, (later) Alloy asserts and RFC MUST clauses.
 //
-// Harvesting is deliberately the first extractor correctful ships. It carries
-// zero extraction risk: the claims already exist as artifacts a human wrote and
-// a machine can read verbatim. The harder cases — inferring claims a diff makes
+// Harvesting is deliberately the first extractor correctful ships. It cannot
+// INVENT a claim — the claims already exist as artifacts a human wrote and a
+// machine can read verbatim — though what it reads can still be noise, so
+// remainder precision is measured, not assumed. The harder cases — inferring claims a diff makes
 // implicitly (structural heuristics, then an LLM) — are later increments, each
 // gated on beating the harvest path it builds on.
 package harvest

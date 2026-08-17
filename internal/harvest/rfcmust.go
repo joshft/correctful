@@ -97,7 +97,13 @@ func isNormativeDoc(rel, content string) bool {
 	if hasRFCSegment(rel) {
 		return true
 	}
-	if strings.Contains(content, "RFC 2119") || strings.Contains(content, "BCP 14") {
+	// The boilerplate marker requires the interpretation SENTENCE, not a bare
+	// mention: a document that merely talks about "RFC 2119" (this project's
+	// own README does) is not thereby declaring its keywords normative.
+	// Measured: the mention-based check harvested a README's prose as MUST
+	// clauses.
+	if strings.Contains(content, "interpreted as described in") &&
+		(strings.Contains(content, "RFC 2119") || strings.Contains(content, "BCP 14")) {
 		return true
 	}
 	for _, line := range strings.Split(content, "\n") {

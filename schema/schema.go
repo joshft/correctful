@@ -214,11 +214,17 @@ const (
 	StatusUnverified Status = "unverified"
 )
 
-// ChangeRef identifies the change a receipt is about.
+// ChangeRef identifies the change a receipt is about. Repo is the repository
+// NAME only — a receipt is shareable, and a local filesystem location is not
+// its reader's business. BaseSHA/HeadSHA pin the receipt to immutable inputs
+// (BaseSHA = the merge base actually diffed against); the symbolic refs are
+// kept for readability but move over time.
 type ChangeRef struct {
 	Repo    string   `json:"repo,omitempty"`
 	BaseRef string   `json:"base_ref"`
 	HeadRef string   `json:"head_ref"`
+	BaseSHA string   `json:"base_sha,omitempty"`
+	HeadSHA string   `json:"head_sha,omitempty"`
 	Files   []string `json:"files"`
 }
 

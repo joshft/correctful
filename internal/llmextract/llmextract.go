@@ -69,8 +69,11 @@ func NewClient() (*Client, error) {
 
 // Harvester adapts one extraction over a unified diff to the harvest
 // interface, so coverage accounting and claim reconciliation apply to LLM
-// proposals exactly as they do to every mechanical harvester.
+// proposals exactly as they do to every mechanical harvester. Ctx carries the
+// receipt's overall budget into the API call — the harvest interface is
+// context-free, so the deadline rides in the struct.
 type Harvester struct {
+	Ctx    context.Context
 	Patch  string
 	Client *Client
 }
@@ -82,7 +85,11 @@ func (h Harvester) Harvest(repoDir string, files []string) (harvest.Result, erro
 	if len(sent) == 0 {
 		return harvest.Result{}, nil
 	}
-	raw, err := h.Client.complete(context.Background(), extractionPrompt(sent))
+	ctx := h.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	raw, err := h.Client.complete(ctx, extractionPrompt(sent))
 	if err != nil {
 		return harvest.Result{}, fmt.Errorf("llm extraction: %w", err)
 	}
@@ -103,7 +110,10 @@ func includedSections(patch string, files []string) (sections []string, read []s
 	}
 	total := 0
 	for _, sec := range splitSections(patch) {
-		if total+len(sec) > maxPatchBytes && total > 0 {
+		if len(sec) > maxPatchBytes {
+			continue // a section is sent whole or not at all — never truncated mid-hunk
+		}
+		if total+len(sec) > maxPatchBytes {
 			break // cap reached; later files stay un-read and coverage says so
 		}
 		total += len(sec)
@@ -196,7 +206,6 @@ func mintProposals(raw string, readFiles []string) ([]schema.Claim, error) {
 	}
 
 	var claims []schema.Claim
-	perFile := map[string]int{}
 	for _, p := range props {
 		shape, ok := allowedShapes[strings.TrimSpace(p.Shape)]
 		text := strings.TrimSpace(p.Text)
@@ -206,9 +215,11 @@ func mintProposals(raw string, readFiles []string) ([]schema.Claim, error) {
 		if len(claims) == maxProposals {
 			break
 		}
-		perFile[p.File]++
 		claims = append(claims, schema.Claim{
-			ID:    fmt.Sprintf("LLM:%s:%d", p.File, perFile[p.File]),
+			// The id hashes the proposal's content, so it is stable across
+			// reorderings and re-runs of the same proposal — an ordinal would
+			// re-label every claim whenever the model reordered its output.
+			ID:    fmt.Sprintf("LLM:%s:%08x", p.File, fnv32(p.File+"\x00"+text)),
 			Shape: shape,
 			Text:  truncateStr(text, 300),
 			Source: schema.Source{
@@ -221,6 +232,16 @@ func mintProposals(raw string, readFiles []string) ([]schema.Claim, error) {
 		})
 	}
 	return claims, nil
+}
+
+// fnv32 is FNV-1a over the string — a stable content id, not a security hash.
+func fnv32(s string) uint32 {
+	h := uint32(2166136261)
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return h
 }
 
 // stripFences removes a wrapping markdown code fence if present.

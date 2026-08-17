@@ -1,10 +1,13 @@
 package llmextract
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -77,9 +80,15 @@ func TestExtractMintsValidatedProposals(t *testing.T) {
 		t.Fatalf("claims = %+v, want 2 (invalid shape and unknown file rejected)", res.Claims)
 	}
 	first := res.Claims[0]
-	if first.ID != "LLM:pkg/gate/gate.go:1" || first.Shape != schema.ShapeInvariant ||
+	if !regexp.MustCompile(`^LLM:pkg/gate/gate\.go:[0-9a-f]{8}$`).MatchString(first.ID) ||
+		first.Shape != schema.ShapeInvariant ||
 		first.Source.Kind != schema.SourceLLM || first.Text != "Check rejects nil input." {
 		t.Errorf("first claim = %+v", first)
+	}
+	// The id is content-derived: the same proposal always mints the same id,
+	// so re-runs and reorderings do not re-label claims.
+	if first.ID != fmt.Sprintf("LLM:pkg/gate/gate.go:%08x", fnv32("pkg/gate/gate.go\x00Check rejects nil input.")) {
+		t.Errorf("id %q is not the content hash", first.ID)
 	}
 	if len(first.ProbeIDs) != 0 {
 		t.Errorf("llm proposal carries probes %v — a proposal must be remainder-bound", first.ProbeIDs)
@@ -136,27 +145,57 @@ func TestAPIErrorSurfaces(t *testing.T) {
 	}
 }
 
-// TestTruncationDisclosedThroughRead: when the byte cap cuts the diff, only
-// the files whose sections were actually SENT count as read — coverage then
-// shows the rest as unread by the extractor, which is the honest disclosure.
-func TestTruncationDisclosedThroughRead(t *testing.T) {
-	big := strings.Repeat("+padding line to blow past the byte cap\n", (maxPatchBytes/40)+10)
-	patch := "diff --git a/first.go b/first.go\n--- a/first.go\n+++ b/first.go\n@@ -0,0 +1 @@\n" + big +
-		"diff --git a/second.go b/second.go\n--- a/second.go\n+++ b/second.go\n@@ -0,0 +1 @@\n+small\n"
+// TestByteCapIsHardAndDisclosed: the cap is enforced two ways, both disclosed
+// through Read. A single section LARGER than the whole cap is skipped
+// entirely — sent whole or not at all, never truncated mid-hunk — and once
+// the cumulative cap is reached, later sections are cut.
+func TestByteCapIsHardAndDisclosed(t *testing.T) {
+	oversized := strings.Repeat("+padding line to blow past the byte cap\n", (maxPatchBytes/40)+10)
+	section := func(name, body string) string {
+		return "diff --git a/" + name + " b/" + name + "\n--- a/" + name + "\n+++ b/" + name + "\n@@ -0,0 +1 @@\n" + body
+	}
+
+	// An oversized FIRST section must not smuggle itself in by being first.
+	patch := section("first.go", oversized) + section("second.go", "+small\n")
 	client, reqBody, _ := fixtureServer(t, 200, apiFixture(`[]`))
 	res, err := Harvester{Patch: patch, Client: client}.Harvest("", []string{"first.go", "second.go"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Read) != 1 || res.Read[0] != "first.go" {
-		t.Fatalf("read = %v, want only first.go (second was cut by the cap)", res.Read)
+	if len(res.Read) != 1 || res.Read[0] != "second.go" {
+		t.Fatalf("read = %v, want only second.go (oversized first section skipped whole)", res.Read)
 	}
 	var req apiRequest
 	if err := json.Unmarshal(*reqBody, &req); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(req.Messages[0].Content, "second.go") {
-		t.Error("prompt contains the section the cap should have cut")
+	if strings.Contains(req.Messages[0].Content, "first.go") {
+		t.Error("prompt contains the oversized section the hard cap should have skipped")
+	}
+
+	// Two half-cap sections: the second crosses the cumulative cap and is cut.
+	half := strings.Repeat("+p\n", maxPatchBytes/6)
+	patch2 := section("a.go", half) + section("b.go", half)
+	client2, _, _ := fixtureServer(t, 200, apiFixture(`[]`))
+	res2, err := Harvester{Patch: patch2, Client: client2}.Harvest("", []string{"a.go", "b.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.Read) != 1 || res2.Read[0] != "a.go" {
+		t.Fatalf("read = %v, want only a.go (cumulative cap cut b.go)", res2.Read)
+	}
+}
+
+// TestContextCancellationPropagates: the receipt's budget reaches the API
+// call — a cancelled context aborts the extraction with an error instead of
+// hanging on a background context.
+func TestContextCancellationPropagates(t *testing.T) {
+	client, _, _ := fixtureServer(t, 200, apiFixture(`[]`))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Harvester{Ctx: ctx, Patch: samplePatch, Client: client}.Harvest("", []string{"pkg/gate/gate.go"})
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("err = %v, want context cancellation", err)
 	}
 }
 

@@ -31,11 +31,13 @@ jobs:
         id: receipt
         run: |
           set +e
+          # ONE execution: the probes (multi-minute on Alloy or large test
+          # sets) must not run twice just to render two formats. The markdown
+          # is the comment; it also goes to the job log for humans reading CI.
           ./correctful -base auto -format md > receipt.md
           echo "gate=$?" >> "$GITHUB_OUTPUT"
           set -e
-          # The text form into the job log for humans reading CI directly.
-          ./correctful -base auto || true
+          cat receipt.md
 
       - name: Post or update PR comment
         env:

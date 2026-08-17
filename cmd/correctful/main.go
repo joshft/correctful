@@ -105,7 +105,7 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 		if err != nil {
 			return fmt.Errorf("reading diff for llm extraction: %w", err)
 		}
-		harvesters = append(harvesters, llmextract.Harvester{Patch: patch, Client: client})
+		harvesters = append(harvesters, llmextract.Harvester{Ctx: ctx, Patch: patch, Client: client})
 	}
 	claims, coverage, err := harvest.Run(root, change.Files, harvesters...)
 	if err != nil {

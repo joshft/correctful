@@ -221,3 +221,48 @@ func TestLLMProposedMarker(t *testing.T) {
 		}
 	}
 }
+
+// TestRefutedDetailComesFromFailingProbe: a refuted claim renders the FAILING
+// probe's detail, not an earlier passing probe's "ok".
+func TestRefutedDetailComesFromFailingProbe(t *testing.T) {
+	res := schema.ClaimResult{
+		Claim:  schema.Claim{ID: "INV-1", Text: "holds"},
+		Status: schema.StatusRefuted,
+		Evidence: []schema.Evidence{
+			{ClaimID: "INV-1", ProbeID: "p1", Ran: true, Passed: true, Detail: "ok ./pkg"},
+			{ClaimID: "INV-1", ProbeID: "p2", Ran: true, Passed: false, Detail: "assertion failed: boom"},
+		},
+	}
+	if got := detailOf(res); got != "assertion failed: boom" {
+		t.Fatalf("detailOf = %q, want the failing probe's detail", got)
+	}
+}
+
+// TestReceiptSanitizesPathsAndPinsSHAs: the receipt names the repo, never its
+// location; probe details are scrubbed of the repo root; the header carries
+// the immutable SHA pins.
+func TestReceiptSanitizesPathsAndPinsSHAs(t *testing.T) {
+	change := gitdiff.Change{
+		Repo: "/home/someone/src/proj", BaseRef: "main", HeadRef: "feature",
+		BaseSHA: "aaaabbbbccccdddd", HeadSHA: "1111222233334444",
+	}
+	claims := []schema.Claim{{ID: "A", Text: "t", ProbeIDs: []string{"p"}}}
+	evidence := [][]schema.Evidence{{{ClaimID: "A", ProbeID: "p", Ran: true, Passed: false,
+		Detail: "FAIL /home/someone/src/proj/pkg/x_test.go:12"}}}
+	r := Assemble(change, claims, evidence, schema.Coverage{})
+
+	if r.Change.Repo != "proj" {
+		t.Errorf("receipt repo = %q, want the basename only", r.Change.Repo)
+	}
+	if d := r.Results[0].Evidence[0].Detail; strings.Contains(d, "/home/someone") {
+		t.Errorf("detail leaks the repo location: %q", d)
+	}
+	if r.Change.BaseSHA == "" || r.Change.HeadSHA == "" {
+		t.Errorf("SHAs missing: %+v", r.Change)
+	}
+	var text strings.Builder
+	WriteText(&text, r)
+	if !strings.Contains(text.String(), "(aaaabbbbcccc..111122223333)") {
+		t.Errorf("text header missing SHA pins:\n%s", text.String())
+	}
+}

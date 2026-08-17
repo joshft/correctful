@@ -327,3 +327,32 @@ func TestRefSitesCollectedAndMerged(t *testing.T) {
 		t.Errorf("a.go site line = %d, want 2", got.RefSites[0].Line)
 	}
 }
+
+// TestSpecRefSkipsTestFilesAndTestdata: an id in a test file or under
+// testdata/ is binding material or fixture content, not a shipped-code claim.
+// Measured on a self-sweep: scanning test files filled the remainder with
+// fixture identifiers.
+func TestSpecRefSkipsTestFilesAndTestdata(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"gate.go":            "package x\n// INV-960: shipped-code claim.\nfunc g() {}\n",
+		"gate_test.go":       "package x\n// INV-961 fixture mention\n",
+		"testdata/sample.go": "package y\n// INV-962 fixture content\n",
+	}
+	for rel, content := range files {
+		abs := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := SpecRefHarvester{}.Harvest(dir, []string{"gate.go", "gate_test.go", "testdata/sample.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Claims) != 1 || res.Claims[0].ID != "INV-960" {
+		t.Fatalf("claims = %+v, want only the shipped-code INV-960", res.Claims)
+	}
+}

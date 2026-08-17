@@ -146,3 +146,60 @@ func TestPatchCarriesCommittedAndUncommittedHunks(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveIncludesUntrackedButNotHiddenState: a new file not yet `git
+// add`ed is part of the change; untracked files under hidden directories are
+// tooling state and are not.
+func TestResolveIncludesUntrackedButNotHiddenState(t *testing.T) {
+	dir := initRepo(t, "main")
+	gitrun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	gitrun("checkout", "-q", "-b", "feature")
+	// Tracked territory: pkg/ holds a committed file.
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitrun("add", "pkg/a.go")
+	gitrun("commit", "-q", "-m", "tracked package")
+	for _, d := range []string{".tooling", "toolcache/deep"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for rel, content := range map[string]string{
+		"new_root_test.go":         "package a\n", // root: always tracked territory
+		"pkg/new_test.go":          "package a\n", // beside tracked code
+		".tooling/state.json":      "{}",          // hidden tooling state
+		"toolcache/deep/blob.json": "{}",          // entirely untracked tree
+	} {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	change, err := Resolve(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"new_root_test.go", "pkg/new_test.go"} {
+		if !contains(change.Files, want) {
+			t.Errorf("files = %v, want untracked %s included (tracked territory)", change.Files, want)
+		}
+	}
+	for _, reject := range []string{".tooling/state.json", "toolcache/deep/blob.json"} {
+		if contains(change.Files, reject) {
+			t.Errorf("files = %v — %s is tooling output, not the change", change.Files, reject)
+		}
+	}
+	if change.BaseSHA == "" || change.HeadSHA == "" {
+		t.Errorf("SHA pins missing: %+v", change)
+	}
+}

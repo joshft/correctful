@@ -268,3 +268,26 @@ func TestSentenceSpansOpeningPunctuation(t *testing.T) {
 		t.Errorf("second sentence = %q, want it to begin at the backtick", second)
 	}
 }
+
+// TestRFCMustMentionIsNotBoilerplate: a document that merely TALKS ABOUT
+// "RFC 2119" (as this project's own README does) is not thereby declaring its
+// keywords normative — qualification requires the interpretation sentence.
+// Measured: the mention-based check harvested a README's prose as MUST
+// clauses on a self-sweep.
+func TestRFCMustMentionIsNotBoilerplate(t *testing.T) {
+	dir := t.TempDir()
+	doc := "# Tool notes\n\nThe harvester looks for RFC 2119 boilerplate.\nCallers MUST NOT rely on this sentence being harvested.\n"
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RFCMustHarvester{}.Harvest(dir, []string{"notes.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Claims) != 0 {
+		t.Fatalf("claims = %+v, want none from a mention-only document", res.Claims)
+	}
+	if len(res.Read) != 1 {
+		t.Errorf("read = %v — the sniff-and-reject is still a scan", res.Read)
+	}
+}

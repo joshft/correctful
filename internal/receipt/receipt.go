@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/joshft/correctful/internal/gitdiff"
 	"github.com/joshft/correctful/schema"
@@ -26,6 +29,9 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 		var evs []schema.Evidence
 		if i < len(evidence) {
 			evs = evidence[i]
+		}
+		for j := range evs {
+			evs[j].Detail = sanitizePaths(evs[j].Detail, change.Repo)
 		}
 		status, tier := weigh(evs)
 
@@ -52,9 +58,14 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 	return schema.Receipt{
 		SchemaVersion: schema.SchemaVersion,
 		Change: schema.ChangeRef{
-			Repo:    change.Repo,
+			// The receipt carries the repository NAME, never its location: a
+			// receipt is shareable, and external-tool details are scrubbed of
+			// local paths for the same reason (see sanitizePaths).
+			Repo:    filepath.Base(change.Repo),
 			BaseRef: change.BaseRef,
 			HeadRef: change.HeadRef,
+			BaseSHA: change.BaseSHA,
+			HeadSHA: change.HeadSHA,
 			Files:   change.Files,
 		},
 		Results:   results,
@@ -142,6 +153,40 @@ func anchorNote(c schema.Claim) string {
 	return ""
 }
 
+// shaNote renders the immutable pins beside the symbolic refs, abbreviated.
+func shaNote(c schema.ChangeRef) string {
+	short := func(s string) string {
+		if len(s) > 12 {
+			return s[:12]
+		}
+		return s
+	}
+	switch {
+	case c.BaseSHA != "" && c.HeadSHA != "":
+		return fmt.Sprintf(" (%s..%s)", short(c.BaseSHA), short(c.HeadSHA))
+	case c.HeadSHA != "":
+		return fmt.Sprintf(" (@%s)", short(c.HeadSHA))
+	}
+	return ""
+}
+
+// sanitizePaths scrubs local filesystem locations from probe detail text: the
+// repository root becomes "." and the home directory "~". External tools
+// (compilers, test runners) print absolute paths freely, and a receipt that
+// echoes them leaks machine layout into a shareable artifact.
+func sanitizePaths(detail, repoRoot string) string {
+	if detail == "" {
+		return detail
+	}
+	if repoRoot != "" && repoRoot != "." {
+		detail = strings.ReplaceAll(detail, repoRoot, ".")
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/" {
+		detail = strings.ReplaceAll(detail, home, "~")
+	}
+	return detail
+}
+
 // weigh reduces a claim's evidence to a status and an effective tier.
 //
 //   - refuted:  ANY probe ran and failed. Refutation dominates — a claim bound
@@ -188,7 +233,7 @@ func WriteJSON(w io.Writer, r schema.Receipt) error {
 func WriteText(w io.Writer, r schema.Receipt) {
 	s := r.Summary
 	fmt.Fprintf(w, "correctful receipt (schema %s)\n", r.SchemaVersion)
-	fmt.Fprintf(w, "change: %s...%s", r.Change.BaseRef, r.Change.HeadRef)
+	fmt.Fprintf(w, "change: %s...%s%s", r.Change.BaseRef, r.Change.HeadRef, shaNote(r.Change))
 	if r.Change.Repo != "" {
 		fmt.Fprintf(w, "  [%s]", r.Change.Repo)
 	}
@@ -259,7 +304,15 @@ func writeCoverage(w io.Writer, cov schema.Coverage) {
 	}
 }
 
+// detailOf picks the evidence detail a reader needs: for a refuted claim, the
+// FAILING probe's detail — a claim with five probes where the fourth failed
+// must not display the first probe's "ok".
 func detailOf(res schema.ClaimResult) string {
+	for _, e := range res.Evidence {
+		if e.Refuted() && e.Detail != "" {
+			return e.Detail
+		}
+	}
 	if len(res.Evidence) > 0 && res.Evidence[0].Detail != "" {
 		return res.Evidence[0].Detail
 	}

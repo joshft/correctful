@@ -10,11 +10,15 @@ import (
 	"strings"
 )
 
-// Change is the resolved file set of a diff.
+// Change is the resolved file set of a diff. BaseSHA/HeadSHA pin the receipt
+// to immutable inputs: BaseSHA is the MERGE BASE actually diffed against (not
+// the symbolic ref, which moves), HeadSHA the commit under the working tree.
 type Change struct {
 	Repo    string
 	BaseRef string
 	HeadRef string
+	BaseSHA string
+	HeadSHA string
 	Files   []string
 }
 
@@ -36,18 +40,52 @@ func Resolve(ctx context.Context, dir, baseRef string) (Change, error) {
 	files := nonEmptyLines(out)
 
 	// Include not-yet-committed changes too, so a receipt can be run mid-branch
-	// before the work is committed. Union with the committed diff.
+	// before the work is committed: tracked edits AND untracked files — a new
+	// test file that is not yet `git add`ed is still part of the change, and
+	// leaving it out would hide it even from the coverage disclosure, the one
+	// place a blind spot must never be invisible.
+	//
+	// Untracked inclusion is scoped to territory the repo already TRACKS: a
+	// new file beside tracked code joins the change; an entirely untracked
+	// top-level tree is some other tool's output, not this change. Measured
+	// on a live tree, the unscoped union drowned a 101-file change under
+	// thousands of untracked cache files from an installed tool (plus
+	// hidden-directory tooling state, excluded by the same principle the
+	// harvest layer applies to claim origins). The trade-off is disclosed: a
+	// brand-new top-level directory of real work stays invisible until its
+	// first `git add`.
 	unstaged, _ := run(ctx, dir, "diff", "--name-only", "HEAD")
 	for _, f := range nonEmptyLines(unstaged) {
 		if !contains(files, f) {
 			files = append(files, f)
 		}
 	}
+	tracked, _ := run(ctx, dir, "ls-files")
+	trackedTop := map[string]bool{}
+	for _, f := range nonEmptyLines(tracked) {
+		top, _, _ := strings.Cut(f, "/")
+		trackedTop[top] = true
+	}
+	untracked, _ := run(ctx, dir, "ls-files", "--others", "--exclude-standard")
+	for _, f := range nonEmptyLines(untracked) {
+		top, _, inDir := strings.Cut(f, "/")
+		if inDir && !trackedTop[top] {
+			continue // an entirely untracked top-level tree; the root itself is always tracked territory
+		}
+		if hiddenPath(f) || contains(files, f) {
+			continue
+		}
+		files = append(files, f)
+	}
 
+	baseSHA, _ := run(ctx, dir, "merge-base", baseRef, "HEAD")
+	headSHA, _ := run(ctx, dir, "rev-parse", "HEAD")
 	return Change{
 		Repo:    strings.TrimSpace(repo),
 		BaseRef: baseRef,
 		HeadRef: strings.TrimSpace(head),
+		BaseSHA: strings.TrimSpace(baseSHA),
+		HeadSHA: strings.TrimSpace(headSHA),
 		Files:   files,
 	}, nil
 }
@@ -102,25 +140,28 @@ func ResolveAll(ctx context.Context, dir string) (Change, error) {
 			files = append(files, f)
 		}
 	}
+	headSHA, _ := run(ctx, dir, "rev-parse", "HEAD")
 	return Change{
 		Repo:    strings.TrimSpace(repo),
 		BaseRef: "(whole-tree)",
 		HeadRef: strings.TrimSpace(head),
+		HeadSHA: strings.TrimSpace(headSHA),
 		Files:   files,
 	}, nil
 }
 
 // Patch returns the unified diff text of the change Resolve describes: the
-// committed diff since the merge base (three-dot, matching Resolve's file
-// set), followed by any not-yet-committed changes. This is the substrate the
-// LLM extractor reads — the change itself, not the repository.
+// working tree against the MERGE BASE, in one diff — committed and
+// uncommitted work together, with no overlapping sections for a file changed
+// in both. This is the substrate the LLM extractor reads — the change itself,
+// not the repository. (Untracked files have no diff and are absent here; the
+// coverage disclosure still lists them.)
 func Patch(ctx context.Context, dir, baseRef string) (string, error) {
-	committed, err := run(ctx, dir, "diff", baseRef+"...HEAD")
+	mb, err := run(ctx, dir, "merge-base", baseRef, "HEAD")
 	if err != nil {
 		return "", err
 	}
-	uncommitted, _ := run(ctx, dir, "diff", "HEAD")
-	return committed + uncommitted, nil
+	return run(ctx, dir, "diff", strings.TrimSpace(mb))
 }
 
 // TrackedByPattern lists tracked files matching the given pathspec patterns
@@ -141,6 +182,17 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return string(out), err
+}
+
+// hiddenPath reports whether any component of a repo-relative path is hidden
+// (the harvest layer applies the same rule to claim origins).
+func hiddenPath(path string) bool {
+	for _, part := range strings.Split(path, "/") {
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 func nonEmptyLines(s string) []string {

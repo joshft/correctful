@@ -97,13 +97,24 @@ the remainder and coverage inform the reviewer, they do not fail the build.
 
 ## v0 scope: the harvest path
 
-v0 ships the **harvest** extractor — the one with zero extraction risk. It reads
+v0 ships the **harvest** extractor — the lowest-risk one: it cannot invent a
+claim, only read claims somebody wrote. That does not make its remainder free —
+what it reads can still be noise (fixture identifiers, catalog mentions), so
+remainder precision is measured the way binding precision is, and the noise
+classes dogfooding found (test-file fixtures, mention-only "RFC 2119"
+qualification) are cut, not tolerated. It reads
 claims that are *already written* into the change:
 
 - **Go test names → claims with a bound probe.** A test named for an invariant —
   at the start (`TestINV009_…`) or after a cluster prefix (`TestClusterC_INV004_…`,
   `TestClusterB_INV007a_…`) — becomes an invariant claim whose probe is that test;
-  a pass confers T1. Detection is segment-based (split the name, match whole
+  a pass confers T1. The verdict comes from the `go test -json` EVENT stream,
+  never the exit status: measured empirically, a test that calls `t.Skip`
+  exits 0, so exit-code trust would confer T1 on a test that asserted
+  nothing. Only an explicit `pass` event for the exact test verifies; only an
+  explicit `fail` event refutes; skip, no-match, build failure, and
+  cancellation are all Ran=false — they verify nothing and refute nothing.
+  Detection is segment-based (split the name, match whole
   segments), so it reads ids embedded mid-name that a leading word-boundary scan
   misses, without the false positives a substring scan would admit. Parsed with
   `go/ast`, not text-scraped.
@@ -200,7 +211,10 @@ Everything above harvests claims somebody WROTE — test names, spec ids, Alloy
 asserts, MUST clauses. The wild case is a diff where nobody wrote any of that,
 and there the harvest path is honest but empty. `-llm` adds the extraction
 rung for that case: a language model reads the DIFF (never the repository) and
-proposes the claims the change makes implicitly.
+proposes the claims the change makes implicitly. Be aware what that means
+operationally: **the capped diff — your source changes — is transmitted to the
+Anthropic API.** Nothing else leaves the machine, and nothing at all does
+without the flag.
 
 The cardinal rule is structural here, not aspirational: **proposals carry no
 probes**, land in the remainder at T0, and are marked `[llm-proposed]` in
