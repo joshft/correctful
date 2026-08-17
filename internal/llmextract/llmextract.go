@@ -113,19 +113,33 @@ func includedSections(patch string, files []string) (sections []string, read []s
 	for _, f := range files {
 		inChange[f] = true
 	}
-	total := 0
+	// Hidden directories hold installed tooling and its documentation, not
+	// the change's code — the same principle every mechanical harvester
+	// applies. Measured live: without the exclusion, a change's dot-dir
+	// methodology documents sorted first in the diff and consumed the
+	// ENTIRE byte cap — the model never saw a line of shipped code and
+	// re-extracted the docs' claims instead (extraction-over-prose).
+	//
+	// ONE dot-directory is project-owned behavior, not tooling: .github
+	// carries the repository's own CI contract (this project's merge gate
+	// lives there), and a change to it makes claims. Its sections are
+	// included by ORDERING, not by plain exemption: placed after every
+	// non-hidden section, .github can never crowd shipped code out of the
+	// byte cap — the exact failure the dot-dir rule was measured against.
+	var ordered, githubSecs []string
 	for _, sec := range splitSections(patch) {
-		if harvest.UnderDotDir(sectionFile(sec)) {
-			// The same principle every mechanical harvester applies: hidden
-			// directories hold installed tooling and its documentation, not
-			// the change's code. Measured live: without this, a change's
-			// dot-dir methodology documents sorted first in the diff and
-			// consumed the ENTIRE byte cap — the model never saw a line of
-			// shipped code and re-extracted the docs' claims instead
-			// (extraction-over-prose, the class the cap exists to feed code
-			// into, not documents).
-			continue
+		f := sectionFile(sec)
+		switch {
+		case !harvest.UnderDotDir(f):
+			ordered = append(ordered, sec)
+		case strings.HasPrefix(f, ".github/"):
+			githubSecs = append(githubSecs, sec)
 		}
+	}
+	ordered = append(ordered, githubSecs...)
+
+	total := 0
+	for _, sec := range ordered {
 		if len(sec) > maxPatchBytes {
 			continue // a section is sent whole or not at all — never truncated mid-hunk
 		}

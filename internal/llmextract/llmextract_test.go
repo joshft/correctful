@@ -237,3 +237,55 @@ func TestDotDirSectionsNeverReachTheModel(t *testing.T) {
 		t.Error("prompt carries a dot-dir section")
 	}
 }
+
+// TestGithubSectionsIncludedAfterCode: .github is project-owned behavior (the
+// repository's own CI contract), not installed tooling — its sections reach
+// the model, but ONLY after every non-hidden section, so they can never
+// crowd shipped code out of the byte cap. Other dot-dirs stay excluded.
+func TestGithubSectionsIncludedAfterCode(t *testing.T) {
+	patch := "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n--- a/.github/workflows/ci.yml\n+++ b/.github/workflows/ci.yml\n@@ -0,0 +1 @@\n+      continue-on-error: true\n" +
+		"diff --git a/.tooling/ARCH.md b/.tooling/ARCH.md\n--- a/.tooling/ARCH.md\n+++ b/.tooling/ARCH.md\n@@ -0,0 +1 @@\n+### INV-001: docs\n" +
+		"diff --git a/pkg/gate.go b/pkg/gate.go\n--- a/pkg/gate.go\n+++ b/pkg/gate.go\n@@ -0,0 +1 @@\n+func Gate() {}\n"
+	client, reqBody, _ := fixtureServer(t, 200, apiFixture(`[]`))
+	res, err := Harvester{Patch: patch, Client: client}.Harvest("", []string{".github/workflows/ci.yml", ".tooling/ARCH.md", "pkg/gate.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(*reqBody)
+	codeAt := strings.Index(body, "pkg/gate.go")
+	ghAt := strings.Index(body, ".github/workflows/ci.yml")
+	if codeAt < 0 || ghAt < 0 {
+		t.Fatalf("prompt missing sections (code at %d, .github at %d):\n%.400s", codeAt, ghAt, body)
+	}
+	if ghAt < codeAt {
+		t.Error(".github section precedes shipped code — ordering must keep code first")
+	}
+	if strings.Contains(body, ".tooling/ARCH.md") {
+		t.Error("a non-.github dot-dir section reached the model")
+	}
+	if len(res.Read) != 2 {
+		t.Errorf("read = %v, want the code and .github sections", res.Read)
+	}
+}
+
+// TestGithubSectionCannotCrowdOutCode: when the cap is nearly spent by
+// shipped-code sections, the .github section is the one that gets dropped —
+// the ordering is load-bearing, not cosmetic.
+func TestGithubSectionCannotCrowdOutCode(t *testing.T) {
+	line := strings.Repeat("x", 1024)
+	var code strings.Builder
+	for i := 0; code.Len() < maxPatchBytes-2048; i++ {
+		code.WriteString("diff --git a/pkg/f" + string(rune('a'+i%26)) + ".go b/pkg/f" + string(rune('a'+i%26)) + ".go\n@@ -0,0 +1 @@\n+// " + line + "\n")
+	}
+	gh := "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n@@ -0,0 +1 @@\n+" + strings.Repeat("y", 4096) + "\n"
+	// .github FIRST in the diff — the ordering must still put it last and
+	// drop it at the cap.
+	sections, _ := includedSections(gh+code.String(), nil)
+	joined := strings.Join(sections, "")
+	if strings.Contains(joined, ".github/workflows/ci.yml") {
+		t.Error(".github section crowded shipped code at the cap boundary")
+	}
+	if !strings.Contains(joined, "pkg/f") {
+		t.Error("shipped-code sections missing")
+	}
+}

@@ -292,6 +292,28 @@ against code down to the flag semantics. The parse gate also earned its keep
 live: it caught a truncated response (raising the token budget for a
 reasoning-model generation) and a deprecated request parameter, both loudly.
 
+Measured (round 2, 2026-08 — recall and repeatability, not just precision):
+against BLINDED claim inventories written before any run, on two real merged
+changes. Precision held: 115 of 115 proposals across six runs were accurate,
+zero hallucinated files or mechanisms. Recall — the number round 1 never
+measured — was 11/12 and 9/11: every core behavioral claim surfaced, and the
+misses concentrate where a reader would predict — a subtle negative (a code
+path deliberately NOT instrumented), a deliberate design omission (counts
+disclosed instead of path lists), a documentation-meta claim. Repeatability:
+across four runs on identical input, exact-text stability was ZERO — the
+model rewords every proposal every run, so the content-hashed ids never
+collide — while semantic stability was effectively complete (all four runs
+covered the same claim set; counts varied 18–20). Consequence, stated
+honestly: `[llm-proposed]` remainder rows are stable in MEANING but not in
+id or wording across runs; diffing two receipts' LLM rows textually will
+show churn that is not change. One targeted scope fix also shipped measured:
+`.github` is project-owned behavior (this repository's merge gate lives
+there), so its diff sections now reach the model — ordered AFTER every
+non-hidden section so they can never crowd shipped code out of the byte cap.
+Live A/B on a real workflow-touching change: pre-fix the workflow claim was
+structurally unreachable; post-fix the model minted it from the workflow
+section itself, exact to the step name and setting.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its
