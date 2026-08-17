@@ -304,6 +304,15 @@ func writeCoverage(w io.Writer, cov schema.Coverage) {
 	if hist := unreadHistogram(cov); hist != "" {
 		fmt.Fprintf(w, "  unread (no harvester for): %s\n", hist)
 	}
+	if cov.SuppressedMentions > 0 {
+		fmt.Fprintf(w, "  %s\n", mentionNote(cov.SuppressedMentions))
+	}
+}
+
+// mentionNote states the premise-gate disclosure identically in every
+// renderer — one phrasing, no drift between the receipt's formats.
+func mentionNote(n int) string {
+	return fmt.Sprintf("%d spec-id mention(s) not minted as claims — the repo defines no spec-id corpus, so a reference has no possible referent", n)
 }
 
 // detailOf picks the evidence detail a reader needs: for a refuted claim, the

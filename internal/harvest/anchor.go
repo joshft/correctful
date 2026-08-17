@@ -103,7 +103,27 @@ func BuildDefIndex(repoDir string, files []string) DefIndex {
 }
 
 // AnchorClaims resolves every spec-id claim against the definition index, in
-// place. With an empty index (no corpus) it annotates nothing.
+// place, and returns the claims it kept plus a count of suppressed mentions.
+//
+// PREMISE GATE. With an EMPTY index — a repo that defines no spec-id corpus
+// anywhere — a probe-less spec-id reference cannot be a claim: with no
+// definition to refer to, the sighting is a MENTION of an identifier, not an
+// assertion about a defined invariant. Those claims are dropped and counted
+// (the count is disclosed in the receipt's coverage — suppressing remainder
+// rows silently would be the exact dishonesty the remainder exists to
+// prevent). Everything else — probed spec-id claims, MUST clauses, test-name
+// claims — passes through untouched.
+//
+// The gate is at the PREMISE level deliberately, not the token level.
+// Measured across two real corpora (2,880 and 642 sightings): the dominant
+// real-assertion convention is a mid-comment parenthetical id — exactly the
+// shape of an explanatory example — so no annotation grammar can separate the
+// two textually without destroying most of the real harvest. What separates
+// them is the referent: real corpora define their ids in spec documents, and
+// a repo with zero definitions is not practicing the convention at all. In a
+// repo WITH a corpus, unresolvable ids stay as orphans — an orphan against an
+// existing vocabulary is an anomaly worth surfacing, and both measured
+// corpora yielded true orphans that were real findings.
 //
 // Two measured refinements beyond exact-id lookup:
 //
@@ -121,9 +141,19 @@ func BuildDefIndex(repoDir string, files []string) DefIndex {
 //     title) lies inside the changed files, that definition is the claim's —
 //     a mechanical join, not a guess. A whole-tree sweep changes every file
 //     and therefore scopes nothing, which is the correct degeneration.
-func AnchorClaims(claims []schema.Claim, idx DefIndex, changed []string) {
+func AnchorClaims(claims []schema.Claim, idx DefIndex, changed []string) ([]schema.Claim, int) {
 	if len(idx) == 0 {
-		return
+		kept := claims[:0]
+		suppressed := 0
+		for _, c := range claims {
+			if c.Source.Kind == schema.SourceSpecID &&
+				specIDFromSegment(c.ID) == c.ID && len(c.ProbeIDs) == 0 {
+				suppressed++
+				continue
+			}
+			kept = append(kept, c)
+		}
+		return kept, suppressed
 	}
 	inChange := make(map[string]bool, len(changed))
 	for _, f := range changed {
@@ -168,6 +198,7 @@ func AnchorClaims(claims []schema.Claim, idx DefIndex, changed []string) {
 			c.Text = c.ID + ": " + title
 		}
 	}
+	return claims, 0
 }
 
 // parentID strips a sub-variant letter: INV-013d -> INV-013. Empty when the

@@ -119,7 +119,9 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 	if err != nil {
 		return fmt.Errorf("listing definition corpus: %w", err)
 	}
-	harvest.AnchorClaims(claims, harvest.BuildDefIndex(root, docs), change.Files)
+	var mentions int
+	claims, mentions = harvest.AnchorClaims(claims, harvest.BuildDefIndex(root, docs), change.Files)
+	coverage.SuppressedMentions = mentions
 
 	evidence := probe.NewDispatcher(concurrency, probe.Default()...).
 		Dispatch(ctx, root, claims)

@@ -175,7 +175,18 @@ claims that are *already written* into the change:
   without adopting its title. Measured on a real 101-file change: 53 of 72
   spec-id claims resolved, 17 honestly ambiguous, and the 2 orphans were both
   real findings — an antipattern id cited in a PR title but never added to
-  the catalog, and an invariant no document defines.
+  the catalog, and an invariant no document defines. A repo that defines **no
+  spec-id corpus at all** is not practicing the convention: a probe-less
+  reference there has no possible referent, so it is a **mention**, not a
+  claim — suppressed rather than minted into the remainder, with the count
+  disclosed in the receipt's coverage. The gate sits at the premise level
+  deliberately: measured across two real corpora (2,880 and 642 sightings),
+  the dominant real-assertion shape is a mid-comment parenthetical id —
+  textually identical to an explanatory example — so no stricter annotation
+  grammar could separate the two without destroying most of the real harvest.
+  Measured on this repo's own sweep: the remainder's 7 example-id rows (0 of
+  7 were real invariants) became a single disclosed suppression line, while
+  both corpus-bearing dogfood repos produced byte-identical receipts.
 - **Go probe bindings are coverage-proven where the code is annotated.** The
   second rung. When a claim's id is also written into shipped code (its
   *reference sites*, preserved through claim merges), the go-test probe run

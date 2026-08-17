@@ -119,6 +119,26 @@ func TestT0PassConfersNoVerification(t *testing.T) {
 	}
 }
 
+// TestSuppressedMentionsAreDisclosed: when the premise gate drops spec-id
+// mentions (no definition corpus), BOTH renderers state the suppression —
+// removing remainder rows silently would be the exact dishonesty the
+// remainder exists to prevent.
+func TestSuppressedMentionsAreDisclosed(t *testing.T) {
+	r := Assemble(gitdiff.Change{}, nil, nil, schema.Coverage{SuppressedMentions: 7})
+
+	var md strings.Builder
+	WriteMarkdown(&md, r)
+	if !strings.Contains(md.String(), "7 spec-id mention(s) not minted") {
+		t.Errorf("markdown receipt omits the suppression disclosure:\n%s", md.String())
+	}
+
+	var txt strings.Builder
+	WriteText(&txt, r)
+	if !strings.Contains(txt.String(), "7 spec-id mention(s) not minted") {
+		t.Errorf("text receipt omits the suppression disclosure:\n%s", txt.String())
+	}
+}
+
 // TestRemainderSectionAlwaysRenders: the text receipt states the remainder even
 // when it is empty, so its absence is a declared result, not an omission.
 func TestRemainderSectionAlwaysRenders(t *testing.T) {
