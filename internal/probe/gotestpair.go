@@ -13,12 +13,17 @@ import (
 // A pass means the positive case held AND the negative case was rejected — the
 // adversarial shape — so a pass confers T2.
 //
-// Both tests run in a single `go test -v` invocation, and the runner then
-// verifies from the verbose output that EACH named test actually executed and
-// passed. Exit status alone is not enough: `go test` exits 0 when a -run
-// pattern matches only one of the two names (the other was renamed or
-// deleted), and consuming that as a pair pass would confer T2 on evidence that
-// was never produced — a gate running against unverified substrate.
+// Both tests run in a single `go test -json` invocation, and the verdict
+// comes from the EVENT STREAM under the same discipline as the single runner
+// — never the exit status. The compound shape adds its own hazards on top of
+// the single runner's measured ones: `go test` exits 0 when the -run pattern
+// matches only one of the two names (the other renamed or deleted), and a
+// skipped side also exits 0 — consuming either as a pair pass would confer
+// T2 on evidence that was never produced. The pair passes only on an
+// explicit "pass" event for EACH name; a "fail" event on either side refutes
+// (refutation dominates the other side's state); and everything else — a
+// skip, a missing side, a build failure, cancellation — is Ran=false: it
+// verifies nothing and refutes nothing.
 type GoTestPairRunner struct{}
 
 func (GoTestPairRunner) CanRun(probeID string) bool {
@@ -38,34 +43,58 @@ func (GoTestPairRunner) Run(ctx context.Context, repoDir string, claim schema.Cl
 
 	pattern := "^(" + regexp.QuoteMeta(acceptName) + "|" + regexp.QuoteMeta(rejectName) + ")$"
 	start := time.Now()
-	out, err := runGoTest(ctx, repoDir, "./"+pkgDir, pattern, true)
+	events := runGoTestJSON(ctx, repoDir, "./"+pkgDir, pattern, false, probeID)
 	ev.Duration = time.Since(start).Round(time.Millisecond).String()
 
-	switch {
-	case couldNotRun(out):
-		ev.Ran = false
-		ev.Detail = firstMeaningfulLine(out)
-	case err != nil:
-		ev.Ran = true
-		ev.Passed = false
-		ev.Detail = firstMeaningfulLine(out)
-	case !testPassedIn(out, acceptName):
-		ev.Ran = false
-		ev.Detail = "pair incomplete: " + acceptName + " did not run"
-	case !testPassedIn(out, rejectName):
-		ev.Ran = false
-		ev.Detail = "pair incomplete: " + rejectName + " did not run"
-	default:
-		ev.Ran = true
-		ev.Passed = true
-		ev.Detail = "pair ok: accept=" + acceptName + " reject=" + rejectName
-	}
+	ev.Ran, ev.Passed, ev.Detail = pairVerdictFromEvents(events, acceptName, rejectName)
 	return ev
 }
 
-// testPassedIn reports whether verbose go test output records a top-level pass
-// for exactly the named test. The trailing space before the duration excludes
-// subtest lines ("--- PASS: TestX/case") and name-prefix collisions.
-func testPassedIn(out, name string) bool {
-	return strings.Contains(out, "--- PASS: "+name+" ")
+// pairVerdictFromEvents reduces one event stream to the compound verdict for
+// the two EXACT test names (subtests carry "Parent/sub" names and never
+// match).
+func pairVerdictFromEvents(events []goTestEvent, acceptName, rejectName string) (ran, passed bool, detail string) {
+	terminal := map[string]string{}
+	testOut := map[string][]string{}
+	var otherOut []string
+	for _, e := range events {
+		switch {
+		case e.Test == acceptName || e.Test == rejectName:
+			switch e.Action {
+			case "pass", "fail", "skip":
+				terminal[e.Test] = e.Action
+			case "output":
+				testOut[e.Test] = append(testOut[e.Test], e.Output)
+			}
+		case e.Action == "output" || e.Action == "build-output":
+			otherOut = append(otherOut, e.Output)
+		}
+	}
+
+	sides := []struct{ name, label string }{
+		{acceptName, "accept"},
+		{rejectName, "reject"},
+	}
+	// Refutation dominates: a side that executed and failed refutes the
+	// claim regardless of what the other side did.
+	for _, s := range sides {
+		if terminal[s.name] == "fail" {
+			return true, false, s.label + " side failed: " + failDetail(strings.Join(testOut[s.name], ""))
+		}
+	}
+	for _, s := range sides {
+		switch terminal[s.name] {
+		case "pass":
+		case "skip":
+			return false, false, "pair incomplete: " + s.name + " skipped — a skip asserts nothing"
+		default:
+			if len(terminal) == 0 {
+				// Neither side produced a terminal event: build failure, no
+				// matching tests, or cancellation. Nothing executed.
+				return false, false, firstMeaningfulLine(strings.Join(otherOut, ""))
+			}
+			return false, false, "pair incomplete: " + s.name + " did not run"
+		}
+	}
+	return true, true, "pair ok: accept=" + acceptName + " reject=" + rejectName
 }
