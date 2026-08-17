@@ -25,7 +25,7 @@ var rejectWords = map[string]bool{
 	"Deny": true, "Denies": true, "Denied": true,
 	"Refuse": true, "Refuses": true, "Refused": true,
 	"Invalid": true,
-	"Block": true, "Blocks": true, "Blocked": true,
+	"Block":   true, "Blocks": true, "Blocked": true,
 	"Forbid": true, "Forbids": true, "Forbidden": true,
 }
 

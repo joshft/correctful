@@ -83,12 +83,12 @@ const (
 type SourceKind string
 
 const (
-	SourceGoTest     SourceKind = "go-test"     // a Go test function name
-	SourceDotnetTest SourceKind = "dotnet-test" // a .NET [Fact]/[Theory] test method
-	SourceSpecID     SourceKind = "spec-id"     // an INV/BND/PRH/ABS identifier in source or spec
+	SourceGoTest      SourceKind = "go-test"      // a Go test function name
+	SourceDotnetTest  SourceKind = "dotnet-test"  // a .NET [Fact]/[Theory] test method
+	SourceSpecID      SourceKind = "spec-id"      // an INV/BND/PRH/ABS identifier in source or spec
 	SourceAlloyAssert SourceKind = "alloy-assert" // an Alloy `assert` block
-	SourceAlloyRun   SourceKind = "alloy-run"   // an Alloy `run` command (witness)
-	SourceRFCMust    SourceKind = "rfc-must"    // a MUST/MUST-NOT clause in an RFC
+	SourceAlloyRun    SourceKind = "alloy-run"    // an Alloy `run` command (witness)
+	SourceRFCMust     SourceKind = "rfc-must"     // a MUST/MUST-NOT clause in an RFC
 )
 
 // Source is the provenance of a harvested claim — the evidence trail back to the
@@ -155,10 +155,10 @@ const (
 
 // ChangeRef identifies the change a receipt is about.
 type ChangeRef struct {
-	Repo     string   `json:"repo,omitempty"`
-	BaseRef  string   `json:"base_ref"`
-	HeadRef  string   `json:"head_ref"`
-	Files    []string `json:"files"`
+	Repo    string   `json:"repo,omitempty"`
+	BaseRef string   `json:"base_ref"`
+	HeadRef string   `json:"head_ref"`
+	Files   []string `json:"files"`
 }
 
 // ClaimResult is a claim joined with its weighed standing — the row a reader
@@ -172,10 +172,10 @@ type ClaimResult struct {
 
 // Summary is the headline arithmetic of a receipt.
 type Summary struct {
-	TotalClaims int            `json:"total_claims"`
-	Verified    int            `json:"verified"`
-	Refuted     int            `json:"refuted"`
-	Unverified  int            `json:"unverified"` // == len(Remainder)
+	TotalClaims int `json:"total_claims"`
+	Verified    int `json:"verified"`
+	Refuted     int `json:"refuted"`
+	Unverified  int `json:"unverified"` // == len(Remainder)
 	// TierCounts is keyed by tier label (e.g. "T1-assertion") for a readable
 	// payload.
 	TierCounts map[string]int `json:"tier_counts"`

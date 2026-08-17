@@ -130,7 +130,7 @@ func unionStrings(a, b []string) []string {
 // Default returns the v0 harvester set. Test harvesters come before the
 // spec-reference harvester so probe-bearing claims establish identity first.
 func Default() []Harvester {
-	return []Harvester{GoTestHarvester{}, CSharpTestHarvester{}, AlloyHarvester{}, SpecRefHarvester{}}
+	return []Harvester{GoTestHarvester{}, CSharpTestHarvester{}, AlloyHarvester{}, RFCMustHarvester{}, SpecRefHarvester{}}
 }
 
 // --- shared helpers used by more than one harvester ---

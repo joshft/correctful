@@ -82,13 +82,14 @@ func TestINV009_CoverageThreeWaySplit(t *testing.T) {
 		"b_test.go": "package x\nimport \"testing\"\nfunc TestINV900_HoldsThereToo(t *testing.T) {}\n",
 		"plain.go":  "package x\nfunc helper() {}\n",
 		"notes.md":  "prose about INV-901, which is not code\n",
+		"data.bin":  "\x00\x01binary payload no harvester reads\n",
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	list := []string{"a_test.go", "b_test.go", "plain.go", "notes.md"}
+	list := []string{"a_test.go", "b_test.go", "plain.go", "notes.md", "data.bin"}
 	claims, cov, err := Run(dir, list, Default()...)
 	if err != nil {
 		t.Fatal(err)
@@ -99,8 +100,11 @@ func TestINV009_CoverageThreeWaySplit(t *testing.T) {
 		t.Fatalf("claims = %v, want one INV-900 with 2 probes", claims)
 	}
 
-	if cov.Claimed != 2 || cov.Scanned != 1 || cov.Unread != 1 {
-		t.Fatalf("coverage split = claimed %d / scanned %d / unread %d, want 2/1/1",
+	// notes.md counts as SCANNED, not unread: the rfc-must harvester opens
+	// every candidate document to sniff for normative markers, and the sniff
+	// is honestly a scan (it found none — the file yields zero claims).
+	if cov.Claimed != 2 || cov.Scanned != 2 || cov.Unread != 1 {
+		t.Fatalf("coverage split = claimed %d / scanned %d / unread %d, want 2/2/1",
 			cov.Claimed, cov.Scanned, cov.Unread)
 	}
 	byFile := map[string]schema.FileCoverage{}
@@ -113,8 +117,11 @@ func TestINV009_CoverageThreeWaySplit(t *testing.T) {
 	if len(byFile["plain.go"].ReadBy) == 0 || byFile["plain.go"].Claims != 0 {
 		t.Errorf("plain.go = %+v, want read with zero claims (scanned)", byFile["plain.go"])
 	}
-	if len(byFile["notes.md"].ReadBy) != 0 {
-		t.Errorf("notes.md read by %v, want unread", byFile["notes.md"].ReadBy)
+	if len(byFile["notes.md"].ReadBy) == 0 || byFile["notes.md"].Claims != 0 {
+		t.Errorf("notes.md = %+v, want sniffed by rfc-must with zero claims (its INV-901 mention is prose, not a claim)", byFile["notes.md"])
+	}
+	if len(byFile["data.bin"].ReadBy) != 0 {
+		t.Errorf("data.bin read by %v, want unread", byFile["data.bin"].ReadBy)
 	}
 }
 

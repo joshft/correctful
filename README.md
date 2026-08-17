@@ -135,6 +135,18 @@ claims that are *already written* into the change:
   downloaded mid-receipt) and shares the parsed JSON receipt across all of the
   file's probes; a counterexample refutes concretely. Bounded model checking
   confers T3 — stronger than an assertion, short of proof.
+- **RFC MUST clauses → probe-less claims: the honest T0 tenant.** A document
+  that identifies as normative — an `rfc` filename segment, a first heading
+  beginning `# RFC`, or RFC 2119 / BCP 14 boilerplate — is harvested for its
+  UPPERCASE keyword clauses (`MUST`, `MUST NOT`, `SHALL`, `SHALL NOT`,
+  `REQUIRED`): one claim per sentence, wrapped lines unwrapped, blockquote
+  markers stripped, ```text fences included (measured: a real RFC keeps its
+  most load-bearing formula in one), code-labeled fences and lowercase "must"
+  prose excluded, the 2119 boilerplate itself never a claim. Every clause
+  lands in the remainder — no name trick binds an RFC sentence to a test.
+  That is the point: the receipt now *states* the normative surface nothing
+  checks instead of silently not knowing it exists. `SHOULD`/`MAY` are
+  excluded — the remainder carries obligations, not options.
 - **Same-id claims merge; accept/reject pairs earn T2.** Every test named for
   one invariant becomes a probe of the same claim — all run, any can refute.
   When one of those tests is accept-polarity and another is reject-polarity
@@ -194,13 +206,23 @@ than smoothed over:
   extraction-over-prose class — identifiers *listed* as documentation are not
   claims the change *makes*. Structured non-code sources (Alloy, RFC MUSTs) are
   the domain of their own purpose-built harvesters, not the token scanner.
+- **Normative documents must identify themselves.** The RFC harvester harvests
+  a document only when it says it is one — an `rfc` filename segment, a
+  `# RFC` first heading, or 2119 boilerplate. Measured on a real repo: 1 of
+  ~130 candidate documents qualified, with zero false qualifications — but a
+  document stating obligations without any of the markers (say, a `guarantees.md`)
+  is sniffed and passed over, and its clauses stay out of the remainder. The
+  coverage section still lists the file as scanned, so the blind spot is
+  disclosed rather than hidden. Sentence extraction is heuristic (terminal
+  punctuation + capitalization); the receipt quotes clauses verbatim, so a
+  mis-split is visible in the receipt itself.
 
 ## Layout
 
 ```
 schema/                 the payload — Claim, Probe, Evidence, Tier, Receipt
 internal/gitdiff/       resolve the change (diff vs base, or whole tree)
-internal/harvest/       diff → claims (go-test names, spec-id references)
+internal/harvest/       diff → claims (test names, spec ids, Alloy, RFC MUSTs)
 internal/probe/         claims → evidence (dispatcher + go-test runner)
 internal/receipt/       assemble + render (JSON payload, text for humans)
 cmd/correctful/         the CLI
