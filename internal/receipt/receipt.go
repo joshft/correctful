@@ -387,8 +387,11 @@ func writeCoverage(w io.Writer, cov schema.Coverage) {
 	// content no harvester could read, without 400 lines of file list. The
 	// histogram is shared with the markdown renderer — one computation, no
 	// drift between the two disclosures.
-	if hist := unreadHistogram(cov); hist != "" {
+	if hist := unreadHistogram(cov, false); hist != "" {
 		fmt.Fprintf(w, "  unread (no harvester for): %s\n", hist)
+	}
+	if hist := unreadHistogram(cov, true); hist != "" {
+		fmt.Fprintf(w, "  unread (policy — hidden paths hold installed tooling): %s\n", hist)
 	}
 	if cov.SuppressedMentions > 0 {
 		fmt.Fprintf(w, "  %s\n", mentionNote(cov.SuppressedMentions))

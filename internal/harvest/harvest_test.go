@@ -83,13 +83,21 @@ func TestINV009_CoverageThreeWaySplit(t *testing.T) {
 		"plain.go":  "package x\nfunc helper() {}\n",
 		"notes.md":  "prose about INV-901, which is not code\n",
 		"data.bin":  "\x00\x01binary payload no harvester reads\n",
+		// A TRACKED hidden-path document: policy skips it (installed
+		// tooling), which is a different unread story from data.bin's
+		// capability gap — a harvester for .md exists.
+		".tooling/spec.md": "### INV-902: tooling doc\n",
 	}
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		abs := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	list := []string{"a_test.go", "b_test.go", "plain.go", "notes.md", "data.bin"}
+	list := []string{"a_test.go", "b_test.go", "plain.go", "notes.md", "data.bin", ".tooling/spec.md"}
 	claims, cov, err := Run(dir, list, Default()...)
 	if err != nil {
 		t.Fatal(err)
@@ -103,9 +111,12 @@ func TestINV009_CoverageThreeWaySplit(t *testing.T) {
 	// notes.md counts as SCANNED, not unread: the rfc-must harvester opens
 	// every candidate document to sniff for normative markers, and the sniff
 	// is honestly a scan (it found none — the file yields zero claims).
-	if cov.Claimed != 2 || cov.Scanned != 2 || cov.Unread != 1 {
-		t.Fatalf("coverage split = claimed %d / scanned %d / unread %d, want 2/2/1",
+	if cov.Claimed != 2 || cov.Scanned != 2 || cov.Unread != 2 {
+		t.Fatalf("coverage split = claimed %d / scanned %d / unread %d, want 2/2/2",
 			cov.Claimed, cov.Scanned, cov.Unread)
+	}
+	if cov.UnreadPolicy != 1 {
+		t.Fatalf("unread_policy = %d, want 1 (the hidden-path doc)", cov.UnreadPolicy)
 	}
 	byFile := map[string]schema.FileCoverage{}
 	for _, f := range cov.Files {
@@ -122,6 +133,16 @@ func TestINV009_CoverageThreeWaySplit(t *testing.T) {
 	}
 	if len(byFile["data.bin"].ReadBy) != 0 {
 		t.Errorf("data.bin read by %v, want unread", byFile["data.bin"].ReadBy)
+	}
+	// The two unread causes are DIFFERENT disclosures and must not merge.
+	if got := byFile["data.bin"].SkipReason; got != "no-harvester" {
+		t.Errorf("data.bin skip_reason = %q, want no-harvester (capability gap)", got)
+	}
+	if got := byFile[".tooling/spec.md"].SkipReason; got != "hidden-path" {
+		t.Errorf(".tooling/spec.md skip_reason = %q, want hidden-path (policy skip)", got)
+	}
+	if byFile["plain.go"].SkipReason != "" {
+		t.Errorf("a read file carries a skip reason: %+v", byFile["plain.go"])
 	}
 }
 

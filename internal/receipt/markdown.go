@@ -82,8 +82,11 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	cov := r.Coverage
 	fmt.Fprintf(w, "**Harvest coverage:** %d files — %d claimed · %d scanned · %d unread\n",
 		len(cov.Files), cov.Claimed, cov.Scanned, cov.Unread)
-	if hist := unreadHistogram(cov); hist != "" {
+	if hist := unreadHistogram(cov, false); hist != "" {
 		fmt.Fprintf(w, "<sub>unread (no harvester for): %s</sub>\n", hist)
+	}
+	if hist := unreadHistogram(cov, true); hist != "" {
+		fmt.Fprintf(w, "<sub>unread (policy — hidden paths hold installed tooling): %s</sub>\n", hist)
 	}
 	if cov.SuppressedMentions > 0 {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", mentionNote(cov.SuppressedMentions))
@@ -97,12 +100,15 @@ func mdCell(s string) string {
 	return strings.ReplaceAll(s, "\n", " ")
 }
 
-// unreadHistogram renders the unread files grouped by extension, most common
-// first — shared shape with the text renderer's disclosure.
-func unreadHistogram(cov schema.Coverage) string {
+// unreadHistogram renders the unread files of ONE cause grouped by
+// extension, most common first — shared shape with the text renderer's
+// disclosure. With policy set it selects the policy-skipped files
+// (SkipReason "hidden-path"); otherwise it selects every other unread file,
+// so a coverage record without the field still renders as a capability gap.
+func unreadHistogram(cov schema.Coverage, policy bool) string {
 	counts := map[string]int{}
 	for _, f := range cov.Files {
-		if len(f.ReadBy) == 0 && f.Claims == 0 {
+		if len(f.ReadBy) == 0 && f.Claims == 0 && (f.SkipReason == "hidden-path") == policy {
 			ext := path.Ext(f.File)
 			if ext == "" {
 				ext = "(none)"

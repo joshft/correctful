@@ -294,6 +294,12 @@ type FileCoverage struct {
 	// file whose claims merged into another file's claim still counts as
 	// contributing.
 	Claims int `json:"claims"`
+	// SkipReason states WHY an unread file was not read — the two causes are
+	// different disclosures: "hidden-path" means policy skipped it (the file
+	// lives under a hidden directory, which every harvester treats as
+	// installed tooling), while "no-harvester" means a capability gap (no
+	// harvester understands the format). Empty for read files.
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 // Coverage is the receipt's disclosure of its own blind spots: which changed
@@ -306,7 +312,11 @@ type Coverage struct {
 	Files   []FileCoverage `json:"files"`
 	Claimed int            `json:"claimed"` // files sourcing ≥1 claim
 	Scanned int            `json:"scanned"` // read by ≥1 harvester, 0 claims
-	Unread  int            `json:"unread"`  // no harvester read the file
+	Unread  int            `json:"unread"`  // no harvester read the file (total, both causes)
+	// UnreadPolicy counts the subset of Unread that policy skipped
+	// (SkipReason "hidden-path") rather than a capability gap. The receipt
+	// renders the two causes as separate disclosures.
+	UnreadPolicy int `json:"unread_policy,omitempty"`
 	// SuppressedMentions counts spec-id sightings that were NOT minted as
 	// claims because the repo defines no spec-id corpus at all: with no
 	// definition anywhere, a reference has no possible referent — it is a
@@ -332,4 +342,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.6"
+const SchemaVersion = "0.0.7"
