@@ -202,4 +202,54 @@ func TestResolveIncludesUntrackedButNotHiddenState(t *testing.T) {
 	if change.BaseSHA == "" || change.HeadSHA == "" {
 		t.Errorf("SHA pins missing: %+v", change)
 	}
+	// The exclusions above must be DISCLOSED, not silent: the skipped files
+	// never reach the harvest, so the scope boundary is the only place the
+	// blind spot can be stated.
+	if len(change.Excluded) != 2 {
+		t.Fatalf("excluded = %+v, want the territory and hidden rules disclosed", change.Excluded)
+	}
+	terr, hid := change.Excluded[0], change.Excluded[1]
+	if terr.Reason != "untracked-territory" || terr.Count != 1 || len(terr.Dirs) != 1 || terr.Dirs[0] != "toolcache" {
+		t.Errorf("territory exclusion = %+v, want 1 file under toolcache", terr)
+	}
+	if hid.Reason != "untracked-hidden" || hid.Count != 1 {
+		t.Errorf("hidden exclusion = %+v, want 1 hidden untracked file", hid)
+	}
+}
+
+// TestInputDigestPinsWorkingTreeContent: the digest is a function of the
+// resolved set's CONTENT alone — stable across recomputation and input
+// order, changed by an edit, and defined (via an absence marker) for a file
+// the change deletes.
+func TestInputDigestPinsWorkingTreeContent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d1 := InputDigest(dir, []string{"a.go", "b.go", "gone.go"})
+	d2 := InputDigest(dir, []string{"gone.go", "b.go", "a.go"}) // order must not matter
+	if d1 != d2 {
+		t.Errorf("digest depends on input order: %s vs %s", d1, d2)
+	}
+	if len(d1) != 64 {
+		t.Errorf("digest = %q, want 64 hex chars", d1)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package b // edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if d3 := InputDigest(dir, []string{"a.go", "b.go", "gone.go"}); d3 == d1 {
+		t.Errorf("digest unchanged by a content edit — it pins nothing")
+	}
+
+	// A deleted file is part of the change's identity: present-then-deleted
+	// and never-present must both be representable, and a set WITHOUT the
+	// deleted path digests differently from one with it.
+	if with, without := InputDigest(dir, []string{"a.go", "gone.go"}), InputDigest(dir, []string{"a.go"}); with == without {
+		t.Errorf("deleted file invisible to the digest")
+	}
 }

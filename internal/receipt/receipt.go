@@ -61,12 +61,14 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 			// The receipt carries the repository NAME, never its location: a
 			// receipt is shareable, and external-tool details are scrubbed of
 			// local paths for the same reason (see sanitizePaths).
-			Repo:    filepath.Base(change.Repo),
-			BaseRef: change.BaseRef,
-			HeadRef: change.HeadRef,
-			BaseSHA: change.BaseSHA,
-			HeadSHA: change.HeadSHA,
-			Files:   change.Files,
+			Repo:        filepath.Base(change.Repo),
+			BaseRef:     change.BaseRef,
+			HeadRef:     change.HeadRef,
+			BaseSHA:     change.BaseSHA,
+			HeadSHA:     change.HeadSHA,
+			Files:       change.Files,
+			Excluded:    exclusions(change.Excluded),
+			InputDigest: change.InputDigest,
 		},
 		Results:   results,
 		Remainder: remainder,
@@ -153,7 +155,9 @@ func anchorNote(c schema.Claim) string {
 	return ""
 }
 
-// shaNote renders the immutable pins beside the symbolic refs, abbreviated.
+// shaNote renders the immutable pins beside the symbolic refs, abbreviated:
+// the commit SHAs, and the input digest that identifies the harvested content
+// when the tree carries work no commit SHA covers.
 func shaNote(c schema.ChangeRef) string {
 	short := func(s string) string {
 		if len(s) > 12 {
@@ -161,13 +165,50 @@ func shaNote(c schema.ChangeRef) string {
 		}
 		return s
 	}
+	var parts []string
 	switch {
 	case c.BaseSHA != "" && c.HeadSHA != "":
-		return fmt.Sprintf(" (%s..%s)", short(c.BaseSHA), short(c.HeadSHA))
+		parts = append(parts, short(c.BaseSHA)+".."+short(c.HeadSHA))
 	case c.HeadSHA != "":
-		return fmt.Sprintf(" (@%s)", short(c.HeadSHA))
+		parts = append(parts, "@"+short(c.HeadSHA))
 	}
-	return ""
+	if c.InputDigest != "" {
+		parts = append(parts, "input:"+short(c.InputDigest))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, " · ") + ")"
+}
+
+// exclusions maps the resolver's scope-exclusion records into the schema.
+func exclusions(in []gitdiff.Exclusion) []schema.Exclusion {
+	var out []schema.Exclusion
+	for _, e := range in {
+		out = append(out, schema.Exclusion{Reason: e.Reason, Count: e.Count, Dirs: e.Dirs})
+	}
+	return out
+}
+
+// exclusionNote states the scope boundary's own blind spot in one line —
+// shared by every renderer so the disclosure cannot drift between formats.
+func exclusionNote(excl []schema.Exclusion) string {
+	if len(excl) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, e := range excl {
+		switch e.Reason {
+		case "untracked-territory":
+			parts = append(parts, fmt.Sprintf("%d untracked file(s) in never-tracked top-level trees (%s) — invisible until first `git add`",
+				e.Count, strings.Join(e.Dirs, ", ")))
+		case "untracked-hidden":
+			parts = append(parts, fmt.Sprintf("%d hidden untracked file(s)", e.Count))
+		default:
+			parts = append(parts, fmt.Sprintf("%d file(s): %s", e.Count, e.Reason))
+		}
+	}
+	return "scope excluded " + strings.Join(parts, " · ")
 }
 
 // sanitizePaths scrubs local filesystem locations from probe detail text: the
@@ -239,7 +280,11 @@ func WriteText(w io.Writer, r schema.Receipt) {
 	if r.Change.Repo != "" {
 		fmt.Fprintf(w, "  [%s]", r.Change.Repo)
 	}
-	fmt.Fprintf(w, "\nfiles: %d changed\n\n", len(r.Change.Files))
+	fmt.Fprintf(w, "\nfiles: %d changed\n", len(r.Change.Files))
+	if note := exclusionNote(r.Change.Excluded); note != "" {
+		fmt.Fprintf(w, "  %s\n", note)
+	}
+	fmt.Fprintln(w)
 
 	fmt.Fprintf(w, "claims: %d   verified: %d   refuted: %d   unverified: %d\n",
 		s.TotalClaims, s.Verified, s.Refuted, s.Unverified)

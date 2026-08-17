@@ -4,9 +4,14 @@ package gitdiff
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -20,6 +25,26 @@ type Change struct {
 	BaseSHA string
 	HeadSHA string
 	Files   []string
+	// Excluded discloses what Resolve deliberately left OUT of Files. Those
+	// files never reach the harvest, so the coverage section cannot mention
+	// them — this is the one place the exclusion can be stated, and "blind
+	// spots are always stated" applies to the scope boundary itself.
+	Excluded []Exclusion
+	// InputDigest pins the exact content harvested (see the InputDigest
+	// function). HeadSHA identifies a clean tree; a mid-branch receipt over
+	// staged, unstaged, or untracked work needs this to be reproducible.
+	InputDigest string
+}
+
+// Exclusion is one scope rule's deliberate effect on the change: how many
+// files the resolver left out, why, and (for the territory rule) which
+// top-level trees they lived in. Counts, not paths — the measured case was
+// thousands of cache files, and reproducing the list would drown the receipt
+// in exactly the noise the rule exists to exclude.
+type Exclusion struct {
+	Reason string   // stable identifier: "untracked-territory" | "untracked-hidden"
+	Count  int      // files excluded by this rule
+	Dirs   []string // top-level trees affected (territory rule only), sorted
 }
 
 // Resolve returns the files changed between baseRef and the working tree head in
@@ -67,26 +92,54 @@ func Resolve(ctx context.Context, dir, baseRef string) (Change, error) {
 		trackedTop[top] = true
 	}
 	untracked, _ := run(ctx, dir, "ls-files", "--others", "--exclude-standard")
+	// Hidden is checked FIRST so a hidden file inside a never-tracked tree is
+	// attributed to the harvest-wide hidden-path principle, not the narrower
+	// territory rule. Tracked hidden files (a CI workflow) are unaffected —
+	// the exclusions apply to the untracked union only.
+	hidden := 0
+	territoryDirs := map[string]bool{}
+	territory := 0
 	for _, f := range nonEmptyLines(untracked) {
+		if hiddenPath(f) {
+			hidden++
+			continue
+		}
 		top, _, inDir := strings.Cut(f, "/")
 		if inDir && !trackedTop[top] {
-			continue // an entirely untracked top-level tree; the root itself is always tracked territory
+			// An entirely untracked top-level tree; the root itself is
+			// always tracked territory.
+			territoryDirs[top] = true
+			territory++
+			continue
 		}
-		if hiddenPath(f) || contains(files, f) {
+		if contains(files, f) {
 			continue
 		}
 		files = append(files, f)
+	}
+	var excluded []Exclusion
+	if territory > 0 {
+		dirs := make([]string, 0, len(territoryDirs))
+		for d := range territoryDirs {
+			dirs = append(dirs, d)
+		}
+		sort.Strings(dirs)
+		excluded = append(excluded, Exclusion{Reason: "untracked-territory", Count: territory, Dirs: dirs})
+	}
+	if hidden > 0 {
+		excluded = append(excluded, Exclusion{Reason: "untracked-hidden", Count: hidden})
 	}
 
 	baseSHA, _ := run(ctx, dir, "merge-base", baseRef, "HEAD")
 	headSHA, _ := run(ctx, dir, "rev-parse", "HEAD")
 	return Change{
-		Repo:    strings.TrimSpace(repo),
-		BaseRef: baseRef,
-		HeadRef: strings.TrimSpace(head),
-		BaseSHA: strings.TrimSpace(baseSHA),
-		HeadSHA: strings.TrimSpace(headSHA),
-		Files:   files,
+		Repo:     strings.TrimSpace(repo),
+		BaseRef:  baseRef,
+		HeadRef:  strings.TrimSpace(head),
+		BaseSHA:  strings.TrimSpace(baseSHA),
+		HeadSHA:  strings.TrimSpace(headSHA),
+		Files:    files,
+		Excluded: excluded,
 	}, nil
 }
 
@@ -175,6 +228,53 @@ func TrackedByPattern(ctx context.Context, dir string, patterns ...string) ([]st
 		return nil, err
 	}
 	return nonEmptyLines(out), nil
+}
+
+// InputDigest computes a SHA-256 pin over the exact content the harvest will
+// read, so a receipt over a DIRTY tree — staged, unstaged, or untracked work
+// that no commit SHA identifies — is still reproducible: same file set, same
+// bytes, same digest.
+//
+// The formula, so anyone can recompute it: for each file of the resolved set
+// in ascending path order, feed the outer SHA-256 the path, a NUL, then the
+// 32 raw bytes of the file content's own SHA-256 (the string "absent" instead
+// when the path is not a readable regular file — a deletion is part of the
+// change's identity too), then a newline. Per-file inner hashing makes file
+// boundaries unambiguous regardless of content bytes.
+func InputDigest(dir string, files []string) string {
+	sorted := append([]string(nil), files...)
+	sort.Strings(sorted)
+	outer := sha256.New()
+	for _, f := range sorted {
+		io.WriteString(outer, f)
+		outer.Write([]byte{0})
+		if sum, ok := fileSHA256(filepath.Join(dir, f)); ok {
+			outer.Write(sum)
+		} else {
+			io.WriteString(outer, "absent")
+		}
+		outer.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(outer.Sum(nil))
+}
+
+// fileSHA256 streams a regular file into a SHA-256, reporting !ok for
+// anything unreadable or non-regular (deleted files, directories, symlink
+// targets outside the tree).
+func fileSHA256(abs string) ([]byte, bool) {
+	fh, err := os.Open(abs)
+	if err != nil {
+		return nil, false
+	}
+	defer fh.Close()
+	if fi, err := fh.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, false
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, fh); err != nil {
+		return nil, false
+	}
+	return h.Sum(nil), true
 }
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {

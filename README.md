@@ -202,6 +202,19 @@ claims that are *already written* into the change:
   exercised the library beneath the annotated cmd-level enforcement sites).
   Instrumentation never degrades a verdict: an instrumented run that cannot
   execute falls back to a plain run and simply carries no binding statement.
+- **The scope boundary states its own blind spots, and the input is pinned.**
+  The change resolver deliberately excludes two classes of untracked file —
+  never-tracked top-level trees (an installed tool's cache; measured, one
+  such tree drowned a 184-file change under 2,000+ files) and hidden paths.
+  Those files never reach the harvest, so the coverage section cannot account
+  for them; the receipt therefore discloses the exclusions at the scope
+  boundary itself (`excluded`: reason, count, and the trees affected — a
+  brand-new top-level directory of real work stays invisible until its first
+  `git add`, and the receipt now *says so* on every affected run). Beside the
+  commit SHAs, `input_digest` pins a SHA-256 over the exact harvested content
+  (sorted path + per-file content hash, deletions marked absent), so a
+  mid-branch receipt over staged, unstaged, or untracked work — which no
+  commit SHA identifies — is reproducible and comparable too.
 - **Same-id claims merge; accept/reject pairs earn T2.** Every test named for
   one invariant becomes a probe of the same claim — all run, any can refute.
   When one of those tests is accept-polarity and another is reject-polarity

@@ -230,6 +230,26 @@ type ChangeRef struct {
 	BaseSHA string   `json:"base_sha,omitempty"`
 	HeadSHA string   `json:"head_sha,omitempty"`
 	Files   []string `json:"files"`
+	// Excluded discloses files the change resolver DELIBERATELY left out of
+	// Files. They never reach the harvest, so the coverage section cannot
+	// account for them — the scope boundary must state its own blind spot.
+	Excluded []Exclusion `json:"excluded,omitempty"`
+	// InputDigest is a SHA-256 pin over the exact content harvested (sorted
+	// path + per-file content hash; see gitdiff.InputDigest for the formula).
+	// HeadSHA identifies a clean tree; a mid-branch receipt over staged,
+	// unstaged, or untracked work is reproducible only through this.
+	InputDigest string `json:"input_digest,omitempty"`
+}
+
+// Exclusion is one scope rule's deliberate effect on the change: how many
+// files it left out, why, and (for the territory rule) which top-level trees
+// they lived in. Counts, not paths — the measured case was thousands of
+// cache files, and listing them would drown the receipt in exactly the noise
+// the rule exists to exclude.
+type Exclusion struct {
+	Reason string   `json:"reason"`         // "untracked-territory" | "untracked-hidden"
+	Count  int      `json:"count"`          // files excluded by this rule
+	Dirs   []string `json:"dirs,omitempty"` // top-level trees affected, sorted (territory only)
 }
 
 // ClaimResult is a claim joined with its weighed standing — the row a reader
@@ -312,4 +332,4 @@ type Receipt struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.5"
+const SchemaVersion = "0.0.6"

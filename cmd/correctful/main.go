@@ -90,6 +90,9 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 	if root == "" {
 		root = repo
 	}
+	// Pin the harvested input: commit SHAs identify only committed state, and
+	// a mid-branch receipt harvests the working tree.
+	change.InputDigest = gitdiff.InputDigest(root, change.Files)
 
 	// Harvest claims, then dispatch probes against them.
 	harvesters := harvest.Default()
