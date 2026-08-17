@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/joshft/correctful/internal/gitdiff"
@@ -211,10 +213,23 @@ func exclusionNote(excl []schema.Exclusion) string {
 	return "scope excluded " + strings.Join(parts, " · ")
 }
 
-// sanitizePaths scrubs local filesystem locations from probe detail text: the
-// repository root becomes "." and the home directory "~". External tools
-// (compilers, test runners) print absolute paths freely, and a receipt that
-// echoes them leaks machine layout into a shareable artifact.
+// sanitizePaths scrubs machine details from probe detail text. Assemble is
+// the CHOKEPOINT: every Evidence.Detail passes through here regardless of
+// which runner produced it, so a runner that echoes arbitrary tool output
+// (a failing test's own message, a compiler error) cannot leak machine
+// layout into a shareable receipt.
+//
+// The rule is categorical, not an enumerated blocklist: the repository root
+// becomes "." (keeping in-repo paths fully readable, relative), and every
+// OTHER absolute path collapses to "…/<basename>". Enumerating known-bad
+// roots (the old repoRoot + $HOME pair) is incomplete by construction — it
+// left temp paths, toolchain roots, other users' homes, and sibling project
+// names (a $HOME replacement renders "~/src/<sibling>/…", which still names
+// the sibling). An absolute path outside the repo is never the receipt
+// reader's business; its basename preserves the actionable part
+// ("…/testing.go:1576"). The machine's hostname is scrubbed to "<host>".
+// URLs pass untouched: "//" never matches the path shape, and a path
+// preceded by an alphanumeric (https:…) is not token-initial.
 func sanitizePaths(detail, repoRoot string) string {
 	if detail == "" {
 		return detail
@@ -222,10 +237,36 @@ func sanitizePaths(detail, repoRoot string) string {
 	if repoRoot != "" && repoRoot != "." {
 		detail = strings.ReplaceAll(detail, repoRoot, ".")
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/" {
-		detail = strings.ReplaceAll(detail, home, "~")
+	return scrubHost(collapseAbsPaths(detail), hostname)
+}
+
+// absPathRe matches a token-initial absolute path of at least two
+// components. The colon is a terminator, not a path character, so
+// "/a/b/x.go:12: msg" collapses to "…/x.go:12: msg" — the file:line
+// actionability survives the redaction.
+var absPathRe = regexp.MustCompile("(^|[\\s\"'`=,;(\\[])(/[^/\\x00\\s\"'`:,;)\\]]+(?:/[^/\\x00\\s\"'`:,;)\\]]+)+)")
+
+func collapseAbsPaths(s string) string {
+	return absPathRe.ReplaceAllStringFunc(s, func(m string) string {
+		sub := absPathRe.FindStringSubmatch(m)
+		return sub[1] + "…/" + path.Base(sub[2])
+	})
+}
+
+// hostname is resolved once; the empty string (lookup failure) disables the
+// scrub rather than failing a receipt over it.
+var hostname = func() string { h, _ := os.Hostname(); return h }()
+
+// scrubHost replaces whole-word occurrences of the machine's hostname.
+// Hostnames shorter than 3 bytes are left alone — a host named "go" would
+// otherwise redact ordinary prose, and a leak needs a name distinctive
+// enough to identify anything.
+func scrubHost(s, host string) string {
+	if len(host) < 3 || !strings.Contains(s, host) {
+		return s
 	}
-	return detail
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(host) + `\b`)
+	return re.ReplaceAllString(s, "<host>")
 }
 
 // weigh reduces a claim's evidence to a status and an effective tier.

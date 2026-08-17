@@ -215,6 +215,15 @@ claims that are *already written* into the change:
   (sorted path + per-file content hash, deletions marked absent), so a
   mid-branch receipt over staged, unstaged, or untracked work — which no
   commit SHA identifies — is reproducible and comparable too.
+- **Probe details are machine-clean by a categorical rule, not a blocklist.**
+  A receipt is shareable, and runners echo arbitrary tool output (a failing
+  test's own message, a compiler error) into evidence details. Every detail
+  passes one sanitization chokepoint: the repository root becomes `.` (in-repo
+  paths stay fully readable), every OTHER absolute path collapses to
+  `…/<basename>` — closing temp paths, toolchain roots, other users' homes,
+  and sibling project names in one rule instead of enumerating known-bad
+  roots — and the machine's hostname is scrubbed. File:line actionability
+  survives the collapse (`…/testing.go:1576`); URLs pass untouched.
 - **Same-id claims merge; accept/reject pairs earn T2.** Every test named for
   one invariant becomes a probe of the same claim — all run, any can refute.
   When one of those tests is accept-polarity and another is reject-polarity
