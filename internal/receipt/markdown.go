@@ -21,6 +21,7 @@ const MarkdownMarker = "<!-- correctful-receipt -->"
 // (it is the part reviewers already trust), and coverage closes the comment so
 // "all verified" can never be read apart from "out of how much".
 func WriteMarkdown(w io.Writer, r schema.Receipt) {
+	r = scrubForDisplay(r)
 	s := r.Summary
 	fmt.Fprintln(w, MarkdownMarker)
 	fmt.Fprintf(w, "## correctful receipt\n\n")
@@ -30,13 +31,13 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		fmt.Fprintf(w, "Anchoring: %d of %d spec-id claims resolved to definitions · %d ambiguous · %d orphan\n\n",
 			a.Resolved, a.SpecIDClaims, a.Ambiguous, a.Orphan)
 	}
-	fmt.Fprintf(w, "Change: `%s...%s`%s — %d files\n", r.Change.BaseRef, r.Change.HeadRef,
+	fmt.Fprintf(w, "Change: `%s...%s`%s — %d files\n", mdCell(r.Change.BaseRef), mdCell(r.Change.HeadRef),
 		mdCell(shaNote(r.Change)), len(r.Change.Files))
 	if note := exclusionNote(r.Change.Excluded); note != "" {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", note)
 	}
 	if p := r.Policy; p != nil {
-		fmt.Fprintf(w, "<sub>policy: `%s` · %s · %d rule(s)%s</sub>\n", p.Path, short(p.Digest), p.Rules, exemptNote(p))
+		fmt.Fprintf(w, "<sub>policy: `%s` · %s · %d rule(s)%s</sub>\n", mdCell(p.Path), short(p.Digest), p.Rules, exemptNote(p))
 	}
 	for _, rec := range r.Intake {
 		fmt.Fprintf(w, "<sub>intake: %s</sub>\n", mdCell(intakeLine(rec)))
@@ -80,7 +81,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		for _, res := range r.Remainder {
 			fmt.Fprintf(w, "| `%s` | %s | `%s:%d` |\n",
 				mdCell(res.Claim.ID), mdCell(res.Claim.Text+anchorNote(res.Claim)+llmNote(res.Claim)+llmEdgeNote(res)),
-				res.Claim.Source.File, res.Claim.Source.Line)
+				mdCell(res.Claim.Source.File), res.Claim.Source.Line)
 		}
 	}
 	fmt.Fprintln(w)
@@ -118,8 +119,14 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: %s; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r), gateLegs(r))
 }
 
-// mdCell makes text safe inside a markdown table cell.
+// mdCell makes text safe inside a markdown table cell OR a code span: a
+// pipe is escaped so it cannot start a new cell, a backtick is removed so a
+// value rendered inside `...` cannot break out and inject markup, and any
+// residual newline collapses to a space. Control runes are already gone
+// (scrubForDisplay runs first), so this handles only the structural
+// characters that survive as printable text.
 func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "`", "")
 	s = strings.ReplaceAll(s, "|", `\|`)
 	return strings.ReplaceAll(s, "\n", " ")
 }

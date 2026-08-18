@@ -148,3 +148,25 @@ func TestLoadKeyRejections(t *testing.T) {
 		t.Fatalf("private key accepted as public: %v", err)
 	}
 }
+
+// TestKeygenRefusesSymlinkedParentDir: O_NOFOLLOW on the final filename is
+// not enough — a symlinked OUTPUT DIRECTORY would redirect both writes.
+// Keygen opens the directory with O_NOFOLLOW and creates the files relative
+// to that descriptor, so a symlinked -out dir is refused.
+func TestKeygenRefusesSymlinkedParentDir(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Keygen(link); err == nil {
+		t.Fatalf("Keygen wrote into a symlinked output directory")
+	}
+	if _, err := os.Lstat(filepath.Join(real, "correctful.key")); !os.IsNotExist(err) {
+		t.Errorf("a key was created through the symlinked directory: %v", err)
+	}
+}

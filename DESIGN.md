@@ -630,6 +630,68 @@ parent receipt digest is its own backlog item; until it ships, signed
 receipts are authenticated individual records, and the docs do not use
 the word "chain" for them).
 
+### Verified adversarially (schema 0.0.14 → hardening)
+
+After signing merged, the same reviewer attacked the implementation with
+live fixtures and confirmed NINE holes — every one reproduced, not
+argued. All nine are closed with regression tests; the highest-value one
+was not on the signing path at all:
+
+1. **Case-variant intake key (CRITICAL, live path).** The strict decoder
+   rejected exact-duplicate keys, but `encoding/json` matches struct
+   fields case-INsensitively and lets a later key win — so a row carrying
+   both `"outcome": "counterexample"` and `"Outcome": "verified"` decoded
+   to a pass, laundering a counterexample away and defeating refutation
+   dominance at the external boundary. This hit every intake run, signed
+   or not. The decoder now rejects any two keys in one object that are
+   equal under case folding but not byte-equal — honest producers never
+   emit such a pair, so the cost is zero.
+2. **Head-only gate accepted the wrong diff (HIGH).** One head commit has
+   many possible diffs (different bases, a dirty tree). `verify -gate`
+   now requires `-base`, so a signed receipt for an empty diff at the
+   same head cannot stand in for the real change.
+3. **Evidence could verify a different claim (HIGH).** The consistency
+   check re-derived the summary but never tied an evidence row to the
+   claim it sat under, so a claim could be renamed to `AUTH-999 / All
+   privileged operations reject unauthenticated callers` while keeping
+   evidence from an unrelated test. Validation now requires every
+   evidence row's `claim_id` to match its claim, and the coverage file
+   set to equal the change file set (the measured scope and the stated
+   scope must be the same).
+4. **Negative intake count slipped the required-supplier gate (HIGH).**
+   `GateBlocked` checked `Accepted == 0`; a forged `-1` read as "usable
+   evidence arrived". The gate now blocks on `Accepted < 1`, and
+   validation rejects negative counts before they reach it.
+5. **Renderers injected terminal and Markdown control (MEDIUM).** A
+   crafted `base_ref` carried an ESC clear-screen and a `## Forged gate
+   pass` heading into the text and Markdown output. Both renderers now
+   scrub every string field of control runes (one place, `scrubForDisplay`)
+   and strip Markdown-structural characters from code spans and cells, so
+   a rendering cannot fake authority — and the rendering still states it
+   is not itself signed.
+6. **Cross-parser integer differential (MEDIUM).** An `int` field above
+   2⁵³ canonicalized and verified but read back as a different value in a
+   double-based parser. Counts are now bounded to the exact-integer range
+   every JSON parser shares.
+7. **Invalid tiers were signable (MEDIUM).** A tier of 99 weighed to
+   "verified" because the check was only `Tier > T0`. Tiers are now
+   validated in `T0..T4` before weighing.
+8. **Audience admitted C1 controls (LOW).** The control-free rule checked
+   ASCII only; it now uses `unicode.IsControl`, so the documented
+   guarantee is true.
+9. **Keygen followed a symlinked parent directory (LOW).** `O_NOFOLLOW`
+   protected the filenames but not the `-out` directory. Keygen now opens
+   the directory with `O_NOFOLLOW` and creates both files relative to
+   that descriptor (`openat`), so neither the directory nor a filename
+   can be redirected by a symlink.
+
+The lesson threading 1, 3, 4, 6, and 7 together: a signature
+authenticates bytes, and byte-authenticity is worthless if the bytes are
+internally incoherent. The consistency validator is therefore the load-
+bearing companion to the signature, and it must re-derive and range-check
+every field a reader or a gate trusts — not just the summary arithmetic
+the first pass covered.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its

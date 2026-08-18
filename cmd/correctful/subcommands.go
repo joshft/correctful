@@ -97,6 +97,15 @@ func cmdVerify(args []string) error {
 	if *in == "" || *pubPath == "" {
 		return fmt.Errorf("need -receipt and -pub")
 	}
+	// A merge gate must pin the exact change, not just its head commit: one
+	// head commit has many possible diffs (different bases, dirty overlays),
+	// and a valid signature over SOME receipt at that head is not a valid
+	// receipt for THIS change. So when -gate is set, require the base SHA
+	// too (CI knows it — the merge base / $GITHUB_BASE_REF). -input-digest
+	// is the strongest additional pin for a mid-branch or dirty tree.
+	if *gate && !*anySubject && *base == "" {
+		return fmt.Errorf("-gate requires -base (the head commit alone does not identify the exact diff); pass the merge base, or -any-subject to gate on authenticity only")
+	}
 
 	data, err := readArtifact(*in)
 	if err != nil {

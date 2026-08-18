@@ -17,10 +17,12 @@ import (
 const maxKeyFileBytes = 16 << 10
 
 // Keygen mints an Ed25519 keypair into dir as correctful.key (PKCS#8 PEM,
-// 0600) and correctful.pub (PKIX PEM, 0644). Both files are created
-// exclusively — an existing file or a pre-planted symlink at either path
-// fails the whole operation, and a failed public write removes the private
-// file so no partial pair survives.
+// 0600) and correctful.pub (PKIX PEM, 0644). The directory is opened once,
+// with O_NOFOLLOW, and both files are created RELATIVE to that descriptor
+// (openat) — so neither a symlinked output directory nor a pre-planted
+// symlink at either filename can redirect a write outside where the
+// operator pointed. Both files are created exclusively; a failed public
+// write removes the private file so no partial pair survives.
 func Keygen(dir string) (privPath, pubPath string, err error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -37,11 +39,20 @@ func Keygen(dir string) (privPath, pubPath string, err error) {
 	privPath = filepath.Join(dir, "correctful.key")
 	pubPath = filepath.Join(dir, "correctful.pub")
 
-	if err := writeExclusive(privPath, pemBytes("PRIVATE KEY", privDER), 0o600); err != nil {
+	// O_NOFOLLOW here rejects a SYMLINKED output directory; O_DIRECTORY
+	// rejects a non-directory.
+	dirFile, err := os.OpenFile(dir, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_DIRECTORY, 0)
+	if err != nil {
+		return "", "", fmt.Errorf("opening output directory %s: %w", dir, err)
+	}
+	defer dirFile.Close()
+	dirFD := int(dirFile.Fd())
+
+	if err := writeExclusiveAt(dirFD, "correctful.key", privPath, pemBytes("PRIVATE KEY", privDER), 0o600); err != nil {
 		return "", "", err
 	}
-	if err := writeExclusive(pubPath, pemBytes("PUBLIC KEY", pubDER), 0o644); err != nil {
-		os.Remove(privPath)
+	if err := writeExclusiveAt(dirFD, "correctful.pub", pubPath, pemBytes("PUBLIC KEY", pubDER), 0o644); err != nil {
+		syscall.Unlinkat(dirFD, "correctful.key")
 		return "", "", err
 	}
 	return privPath, pubPath, nil
@@ -51,19 +62,23 @@ func pemBytes(blockType string, der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
 }
 
-func writeExclusive(path string, data []byte, mode os.FileMode) error {
-	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, mode)
+// writeExclusiveAt creates name inside the directory named by dirFD (openat),
+// exclusively and without following a final-component symlink. label is the
+// full path used only for error messages.
+func writeExclusiveAt(dirFD int, name, label string, data []byte, mode uint32) error {
+	fd, err := syscall.Openat(dirFD, name, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL|syscall.O_NOFOLLOW, mode)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", path, err)
+		return fmt.Errorf("creating %s: %w", label, err)
 	}
+	fh := os.NewFile(uintptr(fd), label)
 	_, werr := fh.Write(data)
 	cerr := fh.Close()
 	if werr != nil {
-		os.Remove(path)
+		syscall.Unlinkat(dirFD, name)
 		return werr
 	}
 	if cerr != nil {
-		os.Remove(path)
+		syscall.Unlinkat(dirFD, name)
 		return cerr
 	}
 	return nil
