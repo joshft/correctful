@@ -158,28 +158,30 @@ func anchoringSummary(claims []schema.Claim) *schema.AnchoringSummary {
 // least one probe and no annotated region was reached; no marker means no
 // coverage check applied.
 func bindingNote(res schema.ClaimResult) string {
-	nameOnly, external := false, ""
+	covered, nameOnly, external := "", false, ""
 	for _, e := range res.Evidence {
 		switch e.Binding {
 		case schema.BindingCovered:
-			return "  [binding: coverage-proven]"
+			covered = "  [binding: coverage-proven]"
 		case schema.BindingFileCovered:
-			return "  [binding: file-coverage-proven]"
+			if covered == "" {
+				covered = "  [binding: file-coverage-proven]"
+			}
 		case schema.BindingNameOnly:
 			nameOnly = true
 		case schema.BindingSupplierAttested:
 			if e.CountsFor(res.Claim) {
-				external = e.Supplier
+				external = "  [external: " + e.Supplier + " — supplier-attested]"
 			}
 		}
 	}
-	switch {
-	case external != "":
-		return "  [external: " + external + " — supplier-attested]"
-	case nameOnly:
+	// Markers ACCUMULATE: an in-tree coverage proof must not hide that an
+	// external row is also acting on the claim (it may be the row setting
+	// the effective tier), and vice versa.
+	if covered == "" && external == "" && nameOnly {
 		return "  [binding: name-only]"
 	}
-	return ""
+	return covered + external
 }
 
 // externalRefutationNote marks a refuted row whose refuting evidence was
@@ -224,6 +226,9 @@ func intakeLine(rec schema.IntakeRecord) string {
 	if n := len(rec.Rejected); n > 0 {
 		s += fmt.Sprintf(", %d rejected", n)
 	}
+	if rec.Required && rec.Accepted == 0 {
+		s += " — REQUIRED with nothing usable (the gate blocks here)"
+	}
 	return s
 }
 
@@ -244,6 +249,8 @@ func llmEdgeNote(res schema.ClaimResult) string {
 		switch e.Binding {
 		case schema.BindingFileNotReached:
 			return "  [llm edge rejected: the probe passed but never executed " + res.Claim.Source.File + "]"
+		case schema.BindingSupplierAttested:
+			return "  [external pass by " + e.Supplier + " not counted: a model-proposed claim verifies only through a coverage-confirmed edge]"
 		case "":
 			return "  [llm edge unconfirmed: no coverage profile, so the pass raised nothing]"
 		}

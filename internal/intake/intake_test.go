@@ -264,7 +264,7 @@ func TestRowRejections(t *testing.T) {
 		`{"claim_id": "INV-999", "probe_id": "p1", "outcome": "counterexample", "detail": "boom"}`,
 		`{"claim_id": "INV-777", "probe_id": "p2", "outcome": "verified"}`,
 		`{"claim_id": "INV-009", "probe_id": "p3", "outcome": "verified"}`,
-		`{"claim_id": "INV-009", "probe_id": "p3", "outcome": "counterexample"}`,
+		`{"claim_id": "INV-009", "probe_id": "p3", "outcome": "verified"}`,
 	}, ",")
 	docPath := write(t, outside, "doc.json", docFor("dafny-worker", "abc", goodDigest, rows))
 	cfgPath := write(t, outside, "cfg.json", configFor(docPath, false))

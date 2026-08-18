@@ -511,6 +511,44 @@ refutation external, and blocked; deleting the required document blocked
 with "not admitted — REQUIRED" on the intake line. All three gate legs
 behaved to specification on the first run.
 
+Verified adversarially (schema 0.0.13): the same reviewer then attacked
+the MERGED implementation with live fixtures and confirmed six holes, each
+now closed with a regression test pinning it:
+
+1. Repository probes ran before intake documents were read, so a changed
+   test could write the configured document during its own probe run and
+   mint T4 for itself — demonstrated live. Intake now reads, hashes, and
+   binds every document BEFORE any probe executes; the ordering comment in
+   main names itself load-bearing.
+2. The out-of-tree boundary was a lexical prefix check, and a symlinked
+   parent directory smuggled an in-tree document past it. Containment is
+   now CANONICAL (every component of both paths resolved), the final
+   component is opened with O_NOFOLLOW, regularity is judged on the opened
+   fd, and the size bound rides a limited reader on that single open.
+3. Duplicate detection was global with a supplier-less key: one supplier's
+   pass caused another supplier's counterexample on the same raw probe id
+   to be rejected as a duplicate — refutation dominance violated.
+   Duplicates are now per supplier; a contradictory duplicate WITHIN a
+   supplier fails the run loudly (silently keeping either verdict could
+   launder the other away).
+4. An admitted-but-empty required document satisfied the gate. Required
+   now means USABLE: zero accepted rows blocks.
+5. The stdlib JSON decoder keeps a duplicate key's last value, which
+   smuggled an "outcome": "verified" behind a counterexample. Strict
+   decoding now rejects duplicate keys at any depth — also a precondition
+   for unambiguous future signatures.
+6. Rejected-row fields bypassed the control-character scrub (a live ESC
+   reached the text receipt), and the scrub missed DEL and C1. Every
+   stored external field is now scrubbed and bounded, rejections included.
+
+Two reviewer recommendations are consciously NOT taken, stated here so the
+divergence is a decision rather than an omission: policy mechanisms stay
+an open token vocabulary (a registry would couple policy validation to
+intake configuration that differs between local and CI invocations; the
+typo cost fails closed as an unsatisfiable floor), and stderr diagnostics
+keep the invoker-supplied intake paths (the flag value already appears in
+the CI configuration; the RECEIPT never carries them).
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its
