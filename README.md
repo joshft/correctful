@@ -206,6 +206,63 @@ The rules:
 - Config and documents must be regular files outside the repository. The
   change under review must not supply its own evidence.
 
+## Signed receipts (optional)
+
+A receipt can carry an Ed25519 signature. The signature proves one thing:
+the holder of the private key produced exactly this canonical content. A
+verifier with the pinned public key can then reject a forged, edited, or
+substituted receipt.
+
+Make a keypair once:
+
+```sh
+correctful keygen -out /ci/keys
+```
+
+Sign and verify in CI as three separate steps:
+
+```sh
+# Step 1 — produce. The key is NOT present in this step: this step builds
+# and executes the change's own test code.
+correctful -base main -format json > receipt.json
+
+# Step 2 — sign. This step runs no probes and reads no repository tree.
+# Only this step mounts the key.
+correctful sign -receipt receipt.json -key /ci/keys/correctful.key \
+  -audience github.com/org/repo -out receipt.signed.json
+
+# Step 3 — verify, in a protected workflow the change cannot edit.
+correctful verify -receipt receipt.signed.json -pub /ci/keys/correctful.pub \
+  -head "$GITHUB_SHA" -audience github.com/org/repo -gate
+```
+
+The rules:
+
+- The main command has no signing flag. A process that runs reviewed test
+  code must never hold the signing key.
+- `verify` needs the expected head SHA. A signature alone proves that SOME
+  receipt is authentic. The subject match ties it to THIS change. Pass
+  `-any-subject` only when you check an archived receipt.
+- The trusted key comes from your `-pub` file, never from the receipt. The
+  key inside the receipt is an identity claim, and `verify` requires it to
+  match your pinned key.
+- The audience binds the signature to one repository. A receipt signed for
+  another repository fails, even under a shared CI key.
+- Exactly one byte form of a signed receipt verifies: its canonical form.
+  A reformatted copy fails. This closes parser differentials.
+- `verify` also re-derives every computable field. A signed receipt whose
+  summary contradicts its own results fails, so a tampered-then-signed
+  summary cannot slip a refutation past the gate.
+- `correctful render -receipt receipt.signed.json -format md` renders the
+  signed JSON for a PR comment without a second probe run. The rendering
+  itself is not signed, and it says so.
+
+What the signature does NOT prove: that the runner was honest, that the
+key was never stolen, or that this receipt is the newest run for its
+subject. A verifier that must reject old runs for the same change needs
+its own freshness rule. Trust in a signed receipt is trust in the key
+holder.
+
 ## The evidence tiers
 
 Each claim carries a tier. The tier tells you how strong the evidence is.

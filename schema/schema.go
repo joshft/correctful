@@ -421,6 +421,11 @@ type Receipt struct {
 	Remainder []ClaimResult `json:"remainder"`
 	Coverage  Coverage      `json:"coverage"`
 	Summary   Summary       `json:"summary"`
+	// Signature authenticates the receipt when present — set only by the
+	// sign subcommand, which runs no probes and reads no tree, so the
+	// reviewed change can never reach the signing key. Nil means unsigned:
+	// the receipt is a report whose authenticity rests on transport alone.
+	Signature *SignatureBlock `json:"signature,omitempty"`
 }
 
 // GateBlocked reports whether the merge gate blocks on this receipt: a
@@ -524,5 +529,32 @@ type IntakeRejection struct {
 	Reason  string `json:"reason"`
 }
 
+// SignatureBlock authenticates a receipt: an Ed25519 signature by the
+// runner's key over the domain-separated canonical payload (the receipt's
+// canonical JSON with this block absent — see internal/signing for the
+// exact preimage). One algorithm on purpose: agility is a vulnerability
+// class this schema opts out of.
+//
+// What the signature proves, exactly: the holder of this private key
+// produced this canonical content. It does NOT prove the runner ran
+// honestly, was not compromised, or that the key was not stolen — trust in
+// a receipt is trust in the key holder, normally a CI system whose signing
+// step runs no reviewed code. PublicKey here is an identity CLAIM the
+// verifier must match against a trusted key it already holds; a verifier
+// that trusts the embedded key alone has verified nothing.
+type SignatureBlock struct {
+	// Alg is always "ed25519"; a verifier rejects anything else.
+	Alg string `json:"alg"`
+	// PublicKey is the standard-base64 32-byte Ed25519 public key.
+	PublicKey string `json:"public_key"`
+	// Audience is the stable repository identity the signature binds (part
+	// of the signed preimage), so a receipt signed for one repository
+	// cannot pass verification configured for another even under a shared
+	// CI key. Empty means the signer bound no audience — weaker, stated.
+	Audience string `json:"audience,omitempty"`
+	// Sig is the standard-base64 64-byte Ed25519 signature.
+	Sig string `json:"sig"`
+}
+
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.13"
+const SchemaVersion = "0.0.14"

@@ -253,3 +253,55 @@ func TestInputDigestPinsWorkingTreeContent(t *testing.T) {
 		t.Errorf("deleted file invisible to the digest")
 	}
 }
+
+// TestInputDigestPinsKindNotJustContent: the digest must change when probe-
+// visible file identity changes even though content bytes do not — an
+// execute-bit flip, or a regular file swapped for a symlink whose target has
+// identical bytes. A signed receipt pins "one exact change"; content-only
+// hashing would let these mutations ride under an already-signed digest.
+func TestInputDigestPinsKindNotJustContent(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "run.sh")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plain := InputDigest(dir, []string{"run.sh"})
+
+	if err := os.Chmod(p, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if exec := InputDigest(dir, []string{"run.sh"}); exec == plain {
+		t.Errorf("execute-bit flip invisible to the digest")
+	}
+
+	// Same content reachable through a symlink must digest differently: the
+	// link ITSELF is the content (its target string), never followed.
+	if err := os.WriteFile(filepath.Join(dir, "real.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.sh", p); err != nil {
+		t.Fatal(err)
+	}
+	link := InputDigest(dir, []string{"run.sh"})
+	if link == plain {
+		t.Errorf("file-to-symlink swap invisible to the digest")
+	}
+
+	// Retargeting the link changes the digest even when both targets hold
+	// identical bytes — the target STRING is what the link contributes.
+	if err := os.WriteFile(filepath.Join(dir, "other.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("other.sh", p); err != nil {
+		t.Fatal(err)
+	}
+	if retargeted := InputDigest(dir, []string{"run.sh"}); retargeted == link {
+		t.Errorf("symlink retarget invisible to the digest")
+	}
+}

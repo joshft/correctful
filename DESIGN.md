@@ -549,6 +549,87 @@ typo cost fails closed as an unsatisfiable floor), and stderr diagnostics
 keep the invoker-supplied intake paths (the flag value already appears in
 the CI configuration; the RECEIPT never carries them).
 
+## Receipt signing (schema 0.0.14): the word "authenticated" made true
+
+The adopted definition calls a receipt "an authenticated record". Through
+schema 0.0.13 nothing made it authentic — anyone could write the JSON.
+Signing closes that gap, and the design was reviewed adversarially BEFORE
+implementation (same loop as the intake contract: design brief → external
+review → build → verification round). The review's central finding
+reshaped the design:
+
+**The signer must not be the probe runner.** The proposed design put a
+`-sign` flag on the main command. The reviewer rated this CRITICAL: the
+main command builds and executes the change's own test code as the same
+user, so any key that process can read, reviewed code can read — and an
+out-of-tree containment check on the key path is no defense, because the
+threat is process-level, not path-level. The shipped design has no signing
+flag on the main command at all. `correctful sign` is a separate
+subcommand that runs no probes and reads no repository tree; CI mounts the
+key only for that step. This is an enforcement-layer honesty point in the
+PMB-020 sense: a flag-level separation inside one binary cannot stop a
+malicious CI configuration — the docs say the topology (produce without
+key, sign without probes, verify in a protected workflow) is what the
+operator must hold, and the binary makes the safe topology the only
+expressible one.
+
+The rest of the shipped design, each element traceable to a review finding:
+
+- **One algorithm.** Ed25519, named in the block, everything else
+  rejected. Agility is a vulnerability class opted out of.
+- **Canonical byte-identity.** Exactly one byte form of a signed receipt
+  verifies: the one `receipt.Canonical` produces (the same encoder as
+  `WriteJSON`, frozen by a golden-vector test). The strict parser rejects
+  unknown fields, duplicate keys at any depth, trailing bytes — including
+  the stray-closing-delimiter case that slipped the old `Decoder.More`
+  EOF check, a live bug the review found in the merged intake code — and
+  invalid UTF-8. No normalization differential survives: a reformatted
+  copy of a valid receipt fails verification.
+- **Domain-separated preimage.** `correctful-receipt-v1\0<audience>\0` +
+  canonical payload (signature block absent). The domain string versions
+  the canonicalization; the audience binds the signature to one
+  repository, so a shared CI key cannot confuse receipts across repos.
+  The audience is control-character-free by validation, so the preimage
+  boundaries cannot shift.
+- **Subject matching is mandatory.** `verify` demands the expected head
+  SHA (optionally base SHA and input digest) and fails on mismatch — a
+  valid signature over SOME receipt is worthless to a gate. `-any-subject`
+  is the explicit, stated opt-out for archival authenticity checks.
+- **The embedded key is a claim, not a root.** `verify` requires the
+  caller's pinned public key and rejects a receipt signed by any other
+  key. Verifying against the embedded key alone is the classic
+  self-certification hole and is structurally not offered.
+- **Consistency validation on both sides.** A signature authenticates
+  bytes, not coherence. The reviewer's attack: sign one refuted result
+  with `Summary.Refuted` zeroed — `GateBlocked` reads the summary, so the
+  valid signature carries a refutation past the gate. `Sign` refuses an
+  inconsistent receipt, and `Verify` re-derives every computable field
+  (statuses, tiers, remainder, summary, coverage arithmetic) even for a
+  signature minted by a bypassing signer. Policy and intake results are
+  validated structurally only — their source documents are digest-pinned,
+  not embedded, and pretending to recompute them would be false assurance.
+- **The input digest pins kind, not just content.** The digest formula
+  now hashes each file's kind (regular/exec/symlink/absent) and never
+  follows a symlink (the link's target string IS its content). Before
+  this, an execute-bit flip or a file-to-symlink swap changed probe
+  behavior under an unchanged digest — "one exact change" requires the
+  mode and type to be part of the identity.
+- **Renderings are not signed and say so.** Only the JSON artifact
+  verifies. `correctful render` produces the PR comment from the signed
+  JSON without a second probe run, and the signature note in every
+  rendering states UNVERIFIED HERE — a pasted "signed by" line must never
+  read as authority.
+
+Two review recommendations are consciously deferred, stated so the
+divergence is a decision: **freshness/replay policy** (all subject fields
+match across two runs of the same change, so an old passing receipt can
+be replayed over a newer failing one — the verifier's CI owns freshness,
+the docs state the limitation, and a protected run identity can join the
+signed payload when a consumer needs it) and **receipt chaining** (a
+parent receipt digest is its own backlog item; until it ships, signed
+receipts are authenticated individual records, and the docs do not use
+the word "chain" for them).
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its
@@ -633,6 +714,10 @@ internal/gitdiff/       resolve the change (diff vs base, or whole tree)
 internal/harvest/       diff → claims (test names, spec ids, Alloy, RFC MUSTs)
 internal/llmextract/    diff → PROPOSED claims (opt-in -llm; remainder-only)
 internal/probe/         claims → evidence (dispatcher + go-test runner)
-internal/receipt/       assemble + render (JSON payload, text for humans)
-cmd/correctful/         the CLI
+internal/policy/        evidence floors per path (correctful.json)
+internal/intake/        external supplier evidence (invoker-owned config)
+internal/signing/       sign/verify receipts (Ed25519, canonical payload)
+internal/strictjson/    the strict JSON contract shared by intake + signing
+internal/receipt/       assemble + render + canonical form + consistency
+cmd/correctful/         the CLI (main + keygen/sign/verify/render)
 ```

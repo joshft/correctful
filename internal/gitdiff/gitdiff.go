@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Change is the resolved file set of a diff. BaseSHA/HeadSHA pin the receipt
@@ -236,11 +237,16 @@ func TrackedByPattern(ctx context.Context, dir string, patterns ...string) ([]st
 // bytes, same digest.
 //
 // The formula, so anyone can recompute it: for each file of the resolved set
-// in ascending path order, feed the outer SHA-256 the path, a NUL, then the
-// 32 raw bytes of the file content's own SHA-256 (the string "absent" instead
-// when the path is not a readable regular file — a deletion is part of the
-// change's identity too), then a newline. Per-file inner hashing makes file
-// boundaries unambiguous regardless of content bytes.
+// in ascending path order, feed the outer SHA-256 the path, a NUL, the
+// file's KIND tag ("file", "exec" when any execute bit is set, "symlink",
+// or "absent"), a NUL, then the 32 raw bytes of the content's own SHA-256
+// (for a symlink, the SHA-256 of its target STRING — the link itself is the
+// content, never followed; nothing for "absent" — a deletion is part of the
+// change's identity too), then a newline. The kind tag is load-bearing: an
+// execute-bit flip or a file-to-symlink swap changes probe behavior with
+// identical content bytes, so it must change the digest — a signed receipt
+// pins "one exact change", not "one content set". Per-file inner hashing
+// makes file boundaries unambiguous regardless of content bytes.
 func InputDigest(dir string, files []string) string {
 	sorted := append([]string(nil), files...)
 	sort.Strings(sorted)
@@ -248,33 +254,50 @@ func InputDigest(dir string, files []string) string {
 	for _, f := range sorted {
 		io.WriteString(outer, f)
 		outer.Write([]byte{0})
-		if sum, ok := fileSHA256(filepath.Join(dir, f)); ok {
-			outer.Write(sum)
-		} else {
-			io.WriteString(outer, "absent")
-		}
+		kind, sum := inputEntry(filepath.Join(dir, f))
+		io.WriteString(outer, kind)
+		outer.Write([]byte{0})
+		outer.Write(sum)
 		outer.Write([]byte{'\n'})
 	}
 	return hex.EncodeToString(outer.Sum(nil))
 }
 
-// fileSHA256 streams a regular file into a SHA-256, reporting !ok for
-// anything unreadable or non-regular (deleted files, directories, symlink
-// targets outside the tree).
-func fileSHA256(abs string) ([]byte, bool) {
-	fh, err := os.Open(abs)
+// inputEntry classifies one path and hashes its content without ever
+// following a symlink (O_NOFOLLOW so the classification and the open cannot
+// be raced apart). Directories, devices, and anything unreadable are
+// "absent" — not harvestable content.
+func inputEntry(abs string) (kind string, sum []byte) {
+	fi, err := os.Lstat(abs)
 	if err != nil {
-		return nil, false
+		return "absent", nil
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(abs)
+		if err != nil {
+			return "absent", nil
+		}
+		h := sha256.Sum256([]byte(target))
+		return "symlink", h[:]
+	}
+	fh, err := os.OpenFile(abs, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return "absent", nil
 	}
 	defer fh.Close()
-	if fi, err := fh.Stat(); err != nil || !fi.Mode().IsRegular() {
-		return nil, false
+	st, err := fh.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		return "absent", nil
 	}
 	h := sha256.New()
 	if _, err := io.Copy(h, fh); err != nil {
-		return nil, false
+		return "absent", nil
 	}
-	return h.Sum(nil), true
+	kind = "file"
+	if st.Mode().Perm()&0o111 != 0 {
+		kind = "exec"
+	}
+	return kind, h.Sum(nil)
 }
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {

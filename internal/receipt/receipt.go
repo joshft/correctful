@@ -4,7 +4,6 @@
 package receipt
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -443,9 +442,12 @@ func weigh(c schema.Claim, evs []schema.Evidence) (schema.Status, schema.Tier) {
 
 // WriteJSON emits the receipt as indented JSON — the payload other tools read.
 func WriteJSON(w io.Writer, r schema.Receipt) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(r)
+	b, err := Canonical(r)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
 }
 
 // WriteText renders the receipt for a human at a terminal. The remainder gets
@@ -461,6 +463,9 @@ func WriteText(w io.Writer, r schema.Receipt) {
 	fmt.Fprintf(w, "\nfiles: %d changed\n", len(r.Change.Files))
 	if note := exclusionNote(r.Change.Excluded); note != "" {
 		fmt.Fprintf(w, "  %s\n", note)
+	}
+	if note := signatureNote(r); note != "" {
+		fmt.Fprintf(w, "%s\n", note)
 	}
 	if p := r.Policy; p != nil {
 		fmt.Fprintf(w, "policy: %s · %s · %d rule(s)%s\n", p.Path, short(p.Digest), p.Rules, exemptNote(p))
@@ -556,6 +561,31 @@ func writeCoverage(w io.Writer, cov schema.Coverage) {
 // renderer — one phrasing, no drift between the receipt's formats.
 func mentionNote(n int) string {
 	return fmt.Sprintf("%d spec-id mention(s) not minted as claims — the repo defines no spec-id corpus, so a reference has no possible referent", n)
+}
+
+// signatureNote states that a signature block is PRESENT without claiming
+// it is valid: a rendering is not a signed artifact, and only `correctful
+// verify` against the JSON can authenticate anything. Saying less would
+// hide the block; saying more would lend a pasted rendering an authority
+// no reader can check.
+func signatureNote(r schema.Receipt) string {
+	b := r.Signature
+	if b == nil {
+		return ""
+	}
+	aud := ""
+	if b.Audience != "" {
+		aud = fmt.Sprintf(" · audience %q", b.Audience)
+	}
+	return fmt.Sprintf("signature: ed25519 by %s%s — UNVERIFIED HERE; this rendering is not signed, authenticate the JSON artifact with `correctful verify`", shortB64(b.PublicKey), aud)
+}
+
+// shortB64 abbreviates a base64 key for display.
+func shortB64(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "…"
+	}
+	return s
 }
 
 // toolNote renders the producing build beside the schema version — shared by
