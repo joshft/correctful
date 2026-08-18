@@ -152,9 +152,21 @@ accept/reject test pair. A rule can also demand a measured execution scope
 | MUST clauses in a normative document | a must-clause claim | no probe is available — the claim stays in the remainder | T0 |
 | nothing (`-llm`) | LLM proposals, with the mark `[llm-proposed]` | a changed test, only when the model names it and coverage confirms the link | T0 or T1 |
 
-The tiers: **T0** unverified · **T1** one assertion held · **T2** an
-accept/reject pair held · **T3** property or model check · **T4** proof,
-exhaustive check, or observation.
+## The evidence tiers
+
+Each claim carries a tier. The tier tells you how strong the evidence is.
+The probe sets the tier. No model and no person can raise it.
+
+| Tier | Name | What passed |
+|---|---|---|
+| **T0** | Unverified | Nothing. No probe ran. The claim stays in the remainder. |
+| **T1** | Assertion | One test. |
+| **T2** | Adversarial | An accept/reject test pair. The good case passed, and the bad case was rejected. |
+| **T3** | Property | A property check or a bounded model check (for example, an Alloy `check`). |
+| **T4** | Proof | A proof, an exhaustive check, or a runtime observation. |
+
+A higher tier means stronger evidence, not certainty. A T1 test can assert
+the wrong property. The receipt states the tier, and no more.
 
 ## The design and the measurements
 
