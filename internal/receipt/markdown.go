@@ -38,6 +38,13 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	if p := r.Policy; p != nil {
 		fmt.Fprintf(w, "<sub>policy: `%s` · %s · %d rule(s)%s</sub>\n", p.Path, short(p.Digest), p.Rules, exemptNote(p))
 	}
+	for _, rec := range r.Intake {
+		fmt.Fprintf(w, "<sub>intake: %s</sub>\n", mdCell(intakeLine(rec)))
+		for _, rej := range rec.Rejected {
+			fmt.Fprintf(w, "<sub>· rejected: %s (%s) — %s</sub>\n",
+				mdCell(rej.ClaimID+" "+rej.ProbeID), mdCell(rej.Outcome), mdCell(rej.Reason))
+		}
+	}
 	fmt.Fprintln(w)
 
 	if p := r.Policy; p != nil && len(p.Misses) > 0 {
@@ -58,7 +65,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "|---|---|")
 		for _, res := range r.Results {
 			if res.Status == schema.StatusRefuted {
-				fmt.Fprintf(w, "| `%s` | %s |\n", mdCell(res.Claim.ID), mdCell(detailOf(res)))
+				fmt.Fprintf(w, "| `%s` | %s |\n", mdCell(res.Claim.ID), mdCell(detailOf(res)+externalRefutationNote(res)))
 			}
 		}
 		fmt.Fprintln(w)
@@ -105,11 +112,7 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	if cov.SuppressedMentions > 0 {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", mentionNote(cov.SuppressedMentions))
 	}
-	gate := "refuted claims block"
-	if r.Policy != nil {
-		gate = "refuted claims and policy misses block"
-	}
-	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: %s; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r), gate)
+	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: %s; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r), gateLegs(r))
 }
 
 // mdCell makes text safe inside a markdown table cell.

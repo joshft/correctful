@@ -152,6 +152,60 @@ accept/reject test pair. A rule can also demand a measured execution scope
 | MUST clauses in a normative document | a must-clause claim | no probe is available — the claim stays in the remainder | T0 |
 | nothing (`-llm`) | LLM proposals, with the mark `[llm-proposed]` | a changed test, only when the model names it and coverage confirms the link | T0 or T1 |
 
+## External evidence (optional)
+
+An external tool — a fuzzer, a proof worker, an observation system — can
+supply evidence rows. correctful validates and binds them. It does not run
+the tool, and it cannot check the tool's work. Each supplied row shows the
+mark `[external: <supplier> — supplier-attested]`, so a reader can weigh
+the residual trust.
+
+Authority comes from you, the invoker, never from the document. Write an
+intake config **outside the repository tree**, and point the run at it:
+
+```sh
+correctful -base main -intake /ci/intake.json
+```
+
+```json
+{
+  "intake_version": 1,
+  "suppliers": [
+    {"name": "proof-worker", "mechanism": "dafny-proof", "max_tier": 4,
+     "document": "/ci/out/proofs.json", "required": true}
+  ]
+}
+```
+
+The profile fixes the supplier's name, mechanism, and maximum tier. The
+supplier's document reports outcomes only:
+
+```json
+{
+  "intake_version": 1,
+  "supplier": "proof-worker",
+  "subject": {"head_sha": "<sha>", "input_digest": "<sha256>"},
+  "results": [
+    {"claim_id": "INV-009", "probe_id": "specs/gate.dfy:GateSafe",
+     "outcome": "verified", "detail": "proof verified, 0 errors"}
+  ]
+}
+```
+
+The rules:
+
+- The subject must match the receipt exactly: head SHA and input digest.
+  A mismatch rejects the whole document as stale, with disclosure.
+- The outcome is one of: `verified`, `counterexample`, `inconclusive`,
+  `not_run`, `error`. Only a counterexample refutes. An unproved proof or
+  a fuzzer timeout never reads as a refutation.
+- A row cannot set its own tier or mechanism. The profile's values apply.
+- Rows that name unknown claims are rejected and listed with reasons. A
+  rejected counterexample stays visible — it can expose claim drift.
+- A `required` supplier with no admitted document blocks the gate.
+- Config and documents must be regular files outside the repository. The
+  change under review must not supply its own evidence.
+
 ## The evidence tiers
 
 Each claim carries a tier. The tier tells you how strong the evidence is.

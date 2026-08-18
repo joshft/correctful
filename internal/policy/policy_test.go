@@ -50,18 +50,26 @@ func TestLoadValidatesAndDigests(t *testing.T) {
 	}
 
 	bad := map[string]string{
-		"not json":          `{"policy_version": 1,`,
-		"wrong version":     `{"policy_version": 2, "rules": [{"paths": ["x"], "min_tier": 1}]}`,
-		"no rules":          `{"policy_version": 1, "rules": []}`,
-		"rule without path": `{"policy_version": 1, "rules": [{"paths": [], "min_tier": 1}]}`,
-		"tier out of range": `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 5}]}`,
-		"unknown mechanism": `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 1, "mechanism": "jest"}]}`,
-		"unknown scope":     `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 1, "scope": "galaxy"}]}`,
+		"not json":            `{"policy_version": 1,`,
+		"wrong version":       `{"policy_version": 2, "rules": [{"paths": ["x"], "min_tier": 1}]}`,
+		"no rules":            `{"policy_version": 1, "rules": []}`,
+		"rule without path":   `{"policy_version": 1, "rules": [{"paths": [], "min_tier": 1}]}`,
+		"tier out of range":   `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 5}]}`,
+		"malformed mechanism": `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 1, "mechanism": "Not A Token!"}]}`,
+		"unknown scope":       `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 1, "scope": "galaxy"}]}`,
 	}
 	for name, content := range bad {
 		if _, err := Load(writePolicy(t, content)); err == nil {
 			t.Errorf("%s: loaded without error — a broken floor must fail loudly", name)
 		}
+	}
+
+	// The mechanism set is OPEN: a floor may require an external supplier's
+	// mechanism (declared in the invoker's intake config). A typo fails
+	// closed as an unsatisfiable floor, never as a load error.
+	external := `{"policy_version": 1, "rules": [{"paths": ["x"], "min_tier": 4, "mechanism": "dafny-proof"}]}`
+	if _, err := Load(writePolicy(t, external)); err != nil {
+		t.Errorf("external mechanism rejected at load: %v", err)
 	}
 }
 
