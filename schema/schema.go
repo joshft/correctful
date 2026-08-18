@@ -436,7 +436,12 @@ func (r Receipt) GateBlocked() bool {
 		return true
 	}
 	for _, rec := range r.Intake {
-		if rec.Required && !rec.Admitted {
+		// Required means USABLE evidence arrived: an admitted document
+		// whose every row was rejected — or an empty one — satisfies
+		// nothing (demonstrated adversarially; the manifest protocol is
+		// the full fix and stays deferred, but zero accepted rows must
+		// not read as a delivered requirement).
+		if rec.Required && (!rec.Admitted || rec.Accepted == 0) {
 			return true
 		}
 	}
@@ -481,6 +486,14 @@ type PolicyMiss struct {
 type IntakeRecord struct {
 	// Supplier is the profile's name (invoker-owned, never row-claimed).
 	Supplier string `json:"supplier"`
+	// SupplierVersion echoes the profile's declared supplier build, when
+	// the invoker stated one — the chain needs it to compare receipts
+	// across supplier upgrades.
+	SupplierVersion string `json:"supplier_version,omitempty"`
+	// ConfigDigest is the SHA-256 (hex) over the intake config's exact
+	// bytes — the pin for the authority file that granted this supplier
+	// its mechanism and tier.
+	ConfigDigest string `json:"config_digest,omitempty"`
 	// Mechanism and MaxTier echo the profile: the authority the invoker
 	// granted, which every admitted row is clamped to.
 	Mechanism string `json:"mechanism"`
@@ -512,4 +525,4 @@ type IntakeRejection struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.12"
+const SchemaVersion = "0.0.13"

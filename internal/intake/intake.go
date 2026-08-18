@@ -33,28 +33,34 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/joshft/correctful/schema"
 )
 
 // Bounds — strict limits so a document cannot balloon a receipt.
 const (
-	maxSuppliers  = 16
-	maxDocBytes   = 4 << 20
-	maxRows       = 500
-	maxDetailLen  = 300
-	maxProbeIDLen = 200
+	maxSuppliers   = 16
+	maxConfigBytes = 64 << 10
+	maxDocBytes    = 4 << 20
+	maxRows        = 500
+	maxDetailLen   = 300
+	maxProbeIDLen  = 200
 )
 
 // Config is the invoker-owned intake configuration: the authority grants.
 type Config struct {
 	IntakeVersion int       `json:"intake_version"`
 	Suppliers     []Profile `json:"suppliers"`
+
+	digest string // SHA-256 over the config's exact bytes — the authority pin
 }
 
 // Profile is one supplier's authority grant.
@@ -62,6 +68,10 @@ type Profile struct {
 	// Name identifies the supplier; token shape, and the value every
 	// admitted row's Evidence.Supplier carries.
 	Name string `json:"name"`
+	// Version identifies the supplier build the invoker vouches for —
+	// echoed into the receipt's intake record so two receipts are
+	// comparable across supplier upgrades. Optional.
+	Version string `json:"version,omitempty"`
 	// Mechanism is the evidence class the invoker vouches this supplier
 	// produces (e.g. "dafny-proof"). Policy floors reference it. Must not
 	// collide with a built-in runner mechanism.
@@ -134,12 +144,9 @@ var builtinMechanisms = map[string]bool{
 // a broken authority grant must never fail open. repoRoot guards the
 // out-of-tree rule for the config itself and every document path.
 func LoadConfig(path, repoRoot string) (*Config, error) {
-	if err := outsideTree(path, repoRoot); err != nil {
-		return nil, fmt.Errorf("intake config: %w", err)
-	}
-	data, err := os.ReadFile(path)
+	data, err := readOutsideTree(path, repoRoot, maxConfigBytes)
 	if err != nil {
-		return nil, fmt.Errorf("reading intake config: %w", err)
+		return nil, fmt.Errorf("intake config: %w", err)
 	}
 	var c Config
 	if err := strictDecode(data, &c); err != nil {
@@ -166,9 +173,12 @@ func LoadConfig(path, repoRoot string) (*Config, error) {
 			return nil, fmt.Errorf("intake config: supplier %q max_tier %d out of range (1–4)", p.Name, p.MaxTier)
 		case p.Document == "":
 			return nil, fmt.Errorf("intake config: supplier %q has no document path", p.Name)
+		case len(p.Version) > 64:
+			return nil, fmt.Errorf("intake config: supplier %q version exceeds 64 bytes", p.Name)
 		}
 		seen[p.Name] = true
 	}
+	c.digest = fmt.Sprintf("%x", sha256.Sum256(data))
 	return &c, nil
 }
 
@@ -188,11 +198,19 @@ func Run(c *Config, repoRoot string, subj Subject, claims []schema.Claim) (map[s
 	}
 	extra := map[string][]schema.Evidence{}
 	var records []schema.IntakeRecord
-	seenProbe := map[string]bool{} // (claim, probe) across ALL documents
+	// Duplicates are per SUPPLIER, keyed by outcome too: two suppliers may
+	// legitimately probe the same target (their evidence is distinct — the
+	// namespaced probe ids differ), so a global key would let one
+	// supplier's pass suppress another's counterexample, violating
+	// refutation dominance (found adversarially, live). Within a supplier,
+	// a contradictory duplicate is a supplier bug and fails LOUDLY —
+	// silently keeping either verdict could launder the other away.
+	seenOutcome := map[string]string{} // supplier\x00claim\x00probe -> outcome
 
 	for _, p := range c.Suppliers {
-		rec := schema.IntakeRecord{Supplier: p.Name, Mechanism: p.Mechanism,
-			MaxTier: schema.Tier(p.MaxTier), Required: p.Required}
+		rec := schema.IntakeRecord{Supplier: p.Name, SupplierVersion: scrub(p.Version),
+			Mechanism: p.Mechanism, MaxTier: schema.Tier(p.MaxTier),
+			Required: p.Required, ConfigDigest: c.digest}
 		doc, digest, reason, err := admit(p, repoRoot, subj)
 		if err != nil {
 			return nil, nil, err
@@ -204,14 +222,19 @@ func Run(c *Config, repoRoot string, subj Subject, claims []schema.Claim) (map[s
 		}
 		rec.Admitted, rec.DocDigest = true, digest
 		for _, r := range doc.Results {
-			if reason := rejectRow(r, claimByID, seenProbe); reason != "" {
+			key := p.Name + "\x00" + r.ClaimID + "\x00" + r.ProbeID
+			if prev, dup := seenOutcome[key]; dup && prev != r.Outcome {
+				return nil, nil, fmt.Errorf("intake document for %q: contradictory verdicts for %s / %s (%s vs %s)",
+					p.Name, r.ClaimID, r.ProbeID, prev, r.Outcome)
+			}
+			if reason := rejectRow(r, claimByID, seenOutcome, key); reason != "" {
 				rec.Rejected = append(rec.Rejected, schema.IntakeRejection{
-					ClaimID: clip(r.ClaimID, maxProbeIDLen), ProbeID: clip(r.ProbeID, maxProbeIDLen),
-					Outcome: r.Outcome, Reason: reason,
+					ClaimID: scrub(clip(r.ClaimID, maxProbeIDLen)), ProbeID: scrub(clip(r.ProbeID, maxProbeIDLen)),
+					Outcome: scrub(clip(r.Outcome, 32)), Reason: reason,
 				})
 				continue
 			}
-			seenProbe[r.ClaimID+"\x00"+r.ProbeID] = true
+			seenOutcome[key] = r.Outcome
 			ev := evidenceFrom(p, r)
 			extra[r.ClaimID] = append(extra[r.ClaimID], ev)
 			rec.Accepted++
@@ -225,18 +248,12 @@ func Run(c *Config, repoRoot string, subj Subject, claims []schema.Claim) (map[s
 // missing or mismatched document is (nil, reason) — recorded, not an error;
 // a malformed one IS an error, same as a malformed config.
 func admit(p Profile, repoRoot string, subj Subject) (*document, string, string, error) {
-	if err := outsideTree(p.Document, repoRoot); err != nil {
-		return nil, "", "", fmt.Errorf("intake document for %q: %w", p.Name, err)
-	}
-	data, err := os.ReadFile(p.Document)
+	data, err := readOutsideTree(p.Document, repoRoot, maxDocBytes)
 	if os.IsNotExist(err) {
 		return nil, "", "no document at the configured path", nil
 	}
 	if err != nil {
-		return nil, "", "", fmt.Errorf("reading intake document for %q: %w", p.Name, err)
-	}
-	if len(data) > maxDocBytes {
-		return nil, "", "", fmt.Errorf("intake document for %q exceeds %d bytes", p.Name, maxDocBytes)
+		return nil, "", "", fmt.Errorf("intake document for %q: %w", p.Name, err)
 	}
 	var doc document
 	if err := strictDecode(data, &doc); err != nil {
@@ -258,7 +275,7 @@ func admit(p Profile, repoRoot string, subj Subject) (*document, string, string,
 }
 
 // rejectRow returns the reason a row does not become evidence, or "".
-func rejectRow(r row, claims map[string]*schema.Claim, seen map[string]bool) string {
+func rejectRow(r row, claims map[string]*schema.Claim, seen map[string]string, key string) string {
 	switch {
 	case !validOutcomes[r.Outcome]:
 		return "unknown outcome (want verified, counterexample, inconclusive, not_run, or error)"
@@ -266,8 +283,9 @@ func rejectRow(r row, claims map[string]*schema.Claim, seen map[string]bool) str
 		return "probe_id empty or too long"
 	case r.ClaimID == "":
 		return "claim_id empty"
-	case seen[r.ClaimID+"\x00"+r.ProbeID]:
-		return "duplicate (claim_id, probe_id) across intake documents"
+	}
+	if _, dup := seen[key]; dup {
+		return "duplicate (claim_id, probe_id) for this supplier"
 	}
 	c, ok := claims[r.ClaimID]
 	if !ok {
@@ -311,39 +329,71 @@ func evidenceFrom(p Profile, r row) schema.Evidence {
 	return ev
 }
 
-// outsideTree rejects symlinks, non-regular files, and any path under the
-// repository root: evidence the reviewed change can write is not evidence.
-func outsideTree(path, repoRoot string) error {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // absence is handled by the caller (recorded, not fatal)
-		}
-		return err
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symlink — intake paths must be regular files", path)
-	}
-	if !fi.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", path)
-	}
+// readOutsideTree reads one intake file with the boundary checks the
+// contract depends on, hardened adversarially:
+//
+//   - CANONICAL containment, not lexical: every path component of both the
+//     file's directory and the repo root is symlink-resolved before the
+//     prefix comparison — a symlinked parent directory was demonstrated to
+//     smuggle an in-tree file past a lexical check.
+//   - The final component must not be a symlink, enforced at open time
+//     with O_NOFOLLOW — an Lstat-then-open pair leaves a swap window.
+//   - The size bound applies through a limited reader on the single opened
+//     fd, and the fd's own Stat (not the path) decides regularity.
+//
+// A missing file returns the raw not-exist error so callers can treat
+// absence as recordable rather than fatal.
+func readOutsideTree(path, repoRoot string, maxBytes int64) ([]byte, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	root, err := filepath.Abs(repoRoot)
+	canonDir, err := filepath.EvalSymlinks(filepath.Dir(abs))
 	if err != nil {
-		return err
+		return nil, err // includes not-exist for the parent
 	}
-	if abs == root || strings.HasPrefix(abs, root+string(filepath.Separator)) {
-		return fmt.Errorf("%s is inside the repository tree — the reviewed change must not supply its own evidence", path)
+	canon := filepath.Join(canonDir, filepath.Base(abs))
+	canonRoot, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	if canon == canonRoot || strings.HasPrefix(canon, canonRoot+string(filepath.Separator)) {
+		return nil, fmt.Errorf("%s resolves inside the repository tree — the reviewed change must not supply its own evidence", path)
+	}
+	f, err := os.OpenFile(canon, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, fmt.Errorf("%s is a symlink — intake paths must be regular files", path)
+		}
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds the %d-byte bound", path, maxBytes)
+	}
+	return data, nil
 }
 
-// strictDecode parses JSON with unknown fields rejected and trailing
-// content refused.
+// strictDecode parses JSON with unknown fields rejected, trailing content
+// refused, and DUPLICATE KEYS refused. The stdlib decoder silently keeps a
+// duplicate's last value — demonstrated to smuggle a second "outcome":
+// "verified" behind a "counterexample" — and last-wins parsing would also
+// make any future signature ambiguous across JSON parsers.
 func strictDecode(data []byte, v any) error {
+	if err := rejectDupKeys(json.NewDecoder(bytes.NewReader(data))); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
@@ -355,12 +405,68 @@ func strictDecode(data []byte, v any) error {
 	return nil
 }
 
-// scrub strips control characters from an external string — supplied text
-// reaches terminals and PR comments, and must not carry escapes. Path
+// rejectDupKeys walks the token stream and fails on a repeated object key
+// at any depth.
+func rejectDupKeys(dec *json.Decoder) error {
+	t, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	return rejectDupKeysIn(dec, t)
+}
+
+func rejectDupKeysIn(dec *json.Decoder, t json.Token) error {
+	d, ok := t.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch d {
+	case '{':
+		seen := map[string]bool{}
+		for dec.More() {
+			kt, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			k, _ := kt.(string)
+			if seen[k] {
+				return fmt.Errorf("duplicate key %q", k)
+			}
+			seen[k] = true
+			vt, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			if err := rejectDupKeysIn(dec, vt); err != nil {
+				return err
+			}
+		}
+		_, err := dec.Token() // consume '}'
+		return err
+	case '[':
+		for dec.More() {
+			vt, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			if err := rejectDupKeysIn(dec, vt); err != nil {
+				return err
+			}
+		}
+		_, err := dec.Token() // consume ']'
+		return err
+	}
+	return nil
+}
+
+// scrub strips control characters — C0 (except newline and tab), DEL, and
+// the C1 range — from an external string: supplied text reaches terminals
+// and PR comments, and must not carry escapes. Applied to EVERY stored
+// external field, rejected rows included (a rejection renders too). Path
 // scrubbing happens later at the receipt's sanitization chokepoint.
 func scrub(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' {
+		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7F || (r >= 0x80 && r <= 0x9F) {
 			return -1
 		}
 		return r

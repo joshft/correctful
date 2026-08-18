@@ -148,24 +148,29 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 	claims, mentions = harvest.AnchorClaims(claims, harvest.BuildDefIndex(root, docs), change.Files)
 	coverage.SuppressedMentions = mentions
 
-	evidence := probe.NewDispatcher(concurrency, probe.Default()...).
-		Dispatch(ctx, root, claims)
-
-	// Admit external evidence AFTER the in-tree probes: supplied rows join
-	// each claim's evidence list and are weighed by the same rules.
-	var intakeRecords []schema.IntakeRecord
+	// Admit external evidence BEFORE any in-tree probe executes. The order
+	// is load-bearing (verified adversarially): repository probes run the
+	// change's own test code, and a probe that writes the configured intake
+	// document during its run must find the document already read, hashed,
+	// and bound — the reviewed change must not supply its own evidence.
+	var (
+		intakeRecords []schema.IntakeRecord
+		extra         map[string][]schema.Evidence
+	)
 	if intakeCfg != nil {
 		subj := intake.Subject{HeadSHA: change.HeadSHA, InputDigest: change.InputDigest}
-		extra, records, err := intake.Run(intakeCfg, root, subj, claims)
+		extra, intakeRecords, err = intake.Run(intakeCfg, root, subj, claims)
 		if err != nil {
 			return err
 		}
-		for i := range claims {
-			if rows := extra[claims[i].ID]; len(rows) > 0 {
-				evidence[i] = append(evidence[i], rows...)
-			}
+	}
+
+	evidence := probe.NewDispatcher(concurrency, probe.Default()...).
+		Dispatch(ctx, root, claims)
+	for i := range claims {
+		if rows := extra[claims[i].ID]; len(rows) > 0 {
+			evidence[i] = append(evidence[i], rows...)
 		}
-		intakeRecords = records
 	}
 
 	r := receipt.Assemble(change, claims, evidence, coverage)
