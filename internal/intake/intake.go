@@ -30,9 +30,7 @@
 package intake
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +40,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/joshft/correctful/internal/strictjson"
 	"github.com/joshft/correctful/schema"
 )
 
@@ -386,77 +385,10 @@ func readOutsideTree(path, repoRoot string, maxBytes int64) ([]byte, error) {
 }
 
 // strictDecode parses JSON with unknown fields rejected, trailing content
-// refused, and DUPLICATE KEYS refused. The stdlib decoder silently keeps a
-// duplicate's last value — demonstrated to smuggle a second "outcome":
-// "verified" behind a "counterexample" — and last-wins parsing would also
-// make any future signature ambiguous across JSON parsers.
+// refused, and DUPLICATE KEYS refused — see internal/strictjson for why
+// each leg is load-bearing at this boundary.
 func strictDecode(data []byte, v any) error {
-	if err := rejectDupKeys(json.NewDecoder(bytes.NewReader(data))); err != nil {
-		return err
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	if dec.More() {
-		return fmt.Errorf("trailing content after the JSON document")
-	}
-	return nil
-}
-
-// rejectDupKeys walks the token stream and fails on a repeated object key
-// at any depth.
-func rejectDupKeys(dec *json.Decoder) error {
-	t, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	return rejectDupKeysIn(dec, t)
-}
-
-func rejectDupKeysIn(dec *json.Decoder, t json.Token) error {
-	d, ok := t.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch d {
-	case '{':
-		seen := map[string]bool{}
-		for dec.More() {
-			kt, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			k, _ := kt.(string)
-			if seen[k] {
-				return fmt.Errorf("duplicate key %q", k)
-			}
-			seen[k] = true
-			vt, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			if err := rejectDupKeysIn(dec, vt); err != nil {
-				return err
-			}
-		}
-		_, err := dec.Token() // consume '}'
-		return err
-	case '[':
-		for dec.More() {
-			vt, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			if err := rejectDupKeysIn(dec, vt); err != nil {
-				return err
-			}
-		}
-		_, err := dec.Token() // consume ']'
-		return err
-	}
-	return nil
+	return strictjson.Decode(data, v)
 }
 
 // scrub strips control characters — C0 (except newline and tab), DEL, and

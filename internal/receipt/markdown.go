@@ -112,6 +112,9 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	if cov.SuppressedMentions > 0 {
 		fmt.Fprintf(w, "<sub>%s</sub>\n", mentionNote(cov.SuppressedMentions))
 	}
+	if note := signatureNote(r); note != "" {
+		fmt.Fprintf(w, "<sub>%s</sub>\n", note)
+	}
 	fmt.Fprintf(w, "\n<sub>schema %s%s · exit gate: %s; the remainder informs, never fails</sub>\n", r.SchemaVersion, toolNote(r), gateLegs(r))
 }
 

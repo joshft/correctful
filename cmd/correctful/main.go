@@ -21,6 +21,19 @@
 // required intake supplier with no admitted document (merge-gate semantics —
 // schema.Receipt.GateBlocked is the definition). The remainder never fails
 // the run — it is an honest report, not a defect.
+//
+// Subcommands (see internal/signing for the trust model):
+//
+//	correctful keygen -out <dir>
+//	correctful sign   -receipt <json> -key <pem> [-audience a] [-out f]
+//	correctful verify -receipt <json> -pub <pem> -head <sha> [-audience a] [-gate]
+//	correctful render -receipt <json> [-format text|md]
+//
+// The main command has no signing flag ON PURPOSE: it executes the change's
+// own test code, and a process that runs reviewed code must never hold the
+// signing key. Produce the receipt first (no key present), sign it in a
+// separate step (key present, no reviewed code runs), verify in a protected
+// workflow against a pinned public key.
 package main
 
 import (
@@ -41,6 +54,15 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		if cmd := subcommand(os.Args[1]); cmd != nil {
+			if err := cmd(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "correctful "+os.Args[1]+":", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
 	base := flag.String("base", "", `diff against this ref; "auto" detects it; empty = whole working tree`)
 	repo := flag.String("repo", ".", "repository directory to inspect")
 	format := flag.String("format", "text", "receipt format: text, json, or md")
