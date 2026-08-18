@@ -548,3 +548,66 @@ func TestPolicySectionRenders(t *testing.T) {
 		t.Errorf("markdown exit-gate line does not name the policy leg")
 	}
 }
+
+// TestIntakeRendersAndExternalMarks: supplied evidence is visible wherever
+// it acts — the intake audit lines in the header, an [external] mark on the
+// verified row AND on the refuted row, the rejected rows with reasons, and
+// the exit-gate line naming the required-intake leg. GateBlocked blocks on
+// a required profile with nothing admitted.
+func TestIntakeRendersAndExternalMarks(t *testing.T) {
+	claim := schema.Claim{ID: "INV-009", Shape: schema.ShapeInvariant, Text: "the gate holds",
+		Source: schema.Source{File: "specs/gate.md", Line: 3}}
+	ext := schema.Evidence{ClaimID: "INV-009", ProbeID: "ext:dafny-worker/gate.dfy:GateSafe",
+		Tier: schema.T4Mechanical, Ran: true, Passed: true, Mechanism: "dafny-proof",
+		Supplier: "dafny-worker", Binding: schema.BindingSupplierAttested, Detail: "proof ok"}
+
+	r := Assemble(gitdiff.Change{BaseRef: "main", HeadRef: "wip"},
+		[]schema.Claim{claim}, [][]schema.Evidence{{ext}}, schema.Coverage{})
+	r.Intake = []schema.IntakeRecord{{
+		Supplier: "dafny-worker", Mechanism: "dafny-proof", MaxTier: schema.T4Mechanical,
+		Required: true, Admitted: true, DocDigest: "abcdef9876543210", Accepted: 1,
+		Rejected: []schema.IntakeRejection{{ClaimID: "INV-999", ProbeID: "p1",
+			Outcome: "counterexample", Reason: "no such claim in this change"}},
+	}}
+
+	if r.Results[0].Status != schema.StatusVerified || r.Results[0].EffectiveTier != schema.T4Mechanical {
+		t.Fatalf("external verified pass mis-weighed: %+v", r.Results[0])
+	}
+	var text, md strings.Builder
+	WriteText(&text, r)
+	WriteMarkdown(&md, r)
+	for name, out := range map[string]string{"text": text.String(), "markdown": md.String()} {
+		for _, want := range []string{"dafny-worker (dafny-proof ≤T4-mechanical)", "admitted abcdef987654",
+			"1 row(s) accepted", "1 rejected", "INV-999", "no such claim in this change",
+			"[external: dafny-worker — supplier-attested]",
+			"missing required intake"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s receipt lacks %q:\n%s", name, want, out)
+			}
+		}
+	}
+
+	// An external counterexample refutes and the refuted row is marked.
+	cx := ext
+	cx.Passed = false
+	cx.Detail = "counterexample found"
+	r2 := Assemble(gitdiff.Change{BaseRef: "main", HeadRef: "wip"},
+		[]schema.Claim{claim}, [][]schema.Evidence{{cx}}, schema.Coverage{})
+	if r2.Results[0].Status != schema.StatusRefuted {
+		t.Fatalf("external counterexample did not refute: %+v", r2.Results[0])
+	}
+	var text2 strings.Builder
+	WriteText(&text2, r2)
+	if !strings.Contains(text2.String(), "counterexample found  [external: dafny-worker]") {
+		t.Errorf("refuted row lost its external mark:\n%s", text2.String())
+	}
+
+	// A required profile with nothing admitted blocks.
+	r3 := schema.Receipt{Intake: []schema.IntakeRecord{{Supplier: "s", Required: true}}}
+	if !r3.GateBlocked() {
+		t.Error("required-not-admitted did not block the gate")
+	}
+	if (schema.Receipt{Intake: []schema.IntakeRecord{{Supplier: "s"}}}).GateBlocked() {
+		t.Error("optional-not-admitted blocked the gate")
+	}
+}

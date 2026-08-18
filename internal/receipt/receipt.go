@@ -158,7 +158,7 @@ func anchoringSummary(claims []schema.Claim) *schema.AnchoringSummary {
 // least one probe and no annotated region was reached; no marker means no
 // coverage check applied.
 func bindingNote(res schema.ClaimResult) string {
-	nameOnly := false
+	nameOnly, external := false, ""
 	for _, e := range res.Evidence {
 		switch e.Binding {
 		case schema.BindingCovered:
@@ -167,12 +167,64 @@ func bindingNote(res schema.ClaimResult) string {
 			return "  [binding: file-coverage-proven]"
 		case schema.BindingNameOnly:
 			nameOnly = true
+		case schema.BindingSupplierAttested:
+			if e.CountsFor(res.Claim) {
+				external = e.Supplier
+			}
 		}
 	}
-	if nameOnly {
+	switch {
+	case external != "":
+		return "  [external: " + external + " — supplier-attested]"
+	case nameOnly:
 		return "  [binding: name-only]"
 	}
 	return ""
+}
+
+// externalRefutationNote marks a refuted row whose refuting evidence was
+// SUPPLIED, not executed — a reader weighing a blocked merge must see that
+// the counterexample is the supplier's word.
+func externalRefutationNote(res schema.ClaimResult) string {
+	for _, e := range res.Evidence {
+		if e.Refuted() && e.Supplier != "" {
+			return "  [external: " + e.Supplier + "]"
+		}
+	}
+	return ""
+}
+
+// gateLegs names what blocks the gate on THIS receipt's configuration —
+// shared by the renderers so the footer never under-states the gate.
+func gateLegs(r schema.Receipt) string {
+	legs := []string{"refuted claims"}
+	if r.Policy != nil {
+		legs = append(legs, "policy misses")
+	}
+	for _, rec := range r.Intake {
+		if rec.Required {
+			legs = append(legs, "missing required intake")
+			break
+		}
+	}
+	return strings.Join(legs, " and ") + " block"
+}
+
+// intakeLine renders one supplier's audit record for the receipt header.
+func intakeLine(rec schema.IntakeRecord) string {
+	s := fmt.Sprintf("%s (%s ≤%s)", rec.Supplier, rec.Mechanism, rec.MaxTier)
+	if !rec.Admitted {
+		s += " — not admitted: " + rec.Reason
+		if rec.Required {
+			s += " — REQUIRED (the gate blocks here)"
+		}
+		return s
+	}
+	s += fmt.Sprintf(" — admitted %s, %d row(s) accepted", short(rec.DocDigest), rec.Accepted)
+	if n := len(rec.Rejected); n > 0 {
+		s += fmt.Sprintf(", %d rejected", n)
+	}
+	return s
 }
 
 // llmEdgeNote discloses why a model-proposed edge did not count: the probe
@@ -406,6 +458,12 @@ func WriteText(w io.Writer, r schema.Receipt) {
 	if p := r.Policy; p != nil {
 		fmt.Fprintf(w, "policy: %s · %s · %d rule(s)%s\n", p.Path, short(p.Digest), p.Rules, exemptNote(p))
 	}
+	for _, rec := range r.Intake {
+		fmt.Fprintf(w, "intake: %s\n", intakeLine(rec))
+		for _, rej := range rec.Rejected {
+			fmt.Fprintf(w, "  rejected: %s %s (%s) — %s\n", rej.ClaimID, rej.ProbeID, rej.Outcome, rej.Reason)
+		}
+	}
 	fmt.Fprintln(w)
 
 	fmt.Fprintf(w, "claims: %d   verified: %d   refuted: %d   unverified: %d\n",
@@ -444,7 +502,7 @@ func WriteText(w io.Writer, r schema.Receipt) {
 		fmt.Fprintln(w, "REFUTED (a probe ran and the claim did not hold — the gate blocks here)")
 		for _, res := range r.Results {
 			if res.Status == schema.StatusRefuted {
-				fmt.Fprintf(w, "  %s — %s\n", res.Claim.ID, detailOf(res))
+				fmt.Fprintf(w, "  %s — %s%s\n", res.Claim.ID, detailOf(res), externalRefutationNote(res))
 			}
 		}
 		fmt.Fprintln(w)
@@ -462,6 +520,7 @@ func WriteText(w io.Writer, r schema.Receipt) {
 	}
 
 	writeCoverage(w, r.Coverage)
+	fmt.Fprintf(w, "\nexit gate: %s; the remainder informs, never fails\n", gateLegs(r))
 }
 
 // writeCoverage renders the harvest's self-disclosure: the same honesty the

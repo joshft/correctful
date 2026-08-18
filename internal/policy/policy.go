@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/joshft/correctful/schema"
@@ -61,10 +62,13 @@ type Policy struct {
 	digest string
 }
 
-var knownMechanisms = map[string]bool{
-	schema.MechanismGoTest: true, schema.MechanismGoTestPair: true,
-	schema.MechanismDotnetTest: true, schema.MechanismAlloyCheck: true,
-}
+// mechanismRe is the token shape a rule's mechanism must have. The set is
+// deliberately OPEN — a floor may require an external supplier's mechanism
+// ("dafny-proof"), declared in the invoker's intake config, so a closed
+// enum here would block the intake contract. The typo risk this admits
+// fails CLOSED: a misspelled mechanism is an unsatisfiable floor, and the
+// miss row shows the best evidence beside the requirement.
+var mechanismRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 var knownScopes = map[string]bool{
 	schema.ScopeSinglePackage: true, schema.ScopeCrossPackage: true,
@@ -98,8 +102,8 @@ func Load(root string) (*Policy, error) {
 		if r.MinTier < 1 || r.MinTier > 4 {
 			return nil, fmt.Errorf("%s: rule %d min_tier %d out of range (1–4)", File, i, r.MinTier)
 		}
-		if r.Mechanism != "" && !knownMechanisms[r.Mechanism] {
-			return nil, fmt.Errorf("%s: rule %d names unknown mechanism %q", File, i, r.Mechanism)
+		if r.Mechanism != "" && !mechanismRe.MatchString(r.Mechanism) {
+			return nil, fmt.Errorf("%s: rule %d mechanism %q is not a lowercase token", File, i, r.Mechanism)
 		}
 		if r.Scope != "" && !knownScopes[r.Scope] {
 			return nil, fmt.Errorf("%s: rule %d names unknown scope %q", File, i, r.Scope)

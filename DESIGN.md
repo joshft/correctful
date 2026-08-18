@@ -447,6 +447,70 @@ demands the tie discipline (id-annotated code reconciled with id-named
 tests, or LLM extraction with confirmed edges), and states exactly what is
 missing when a repo has not adopted it.
 
+## The evidence-intake contract (schema 0.0.12): external suppliers
+
+The probe-supplier surface, opened: an external tool submits evidence rows
+through a schema-shaped intake document, and correctful validates, binds,
+combines, and applies policy — without becoming every probe runner. The
+first draft of this contract was reshaped by an adversarial pre-implementation
+design review; the five critical findings it surfaced are now the design:
+
+1. **The row must not control its own authority.** The draft let a
+   document carry its own tier and mechanism — one JSON file could mint T4
+   evidence for any claim. Authority now lives in an invoker-owned
+   PROFILE: the intake config fixes each supplier's name, mechanism, and
+   maximum tier (the external analogue of `Runner.MaxTier`), and a row
+   reports an OUTCOME only.
+2. **Outcomes are an enum, not booleans.** `verified / counterexample /
+   inconclusive / not_run / error` — only a counterexample refutes. A
+   proof failure can mean *unproved*; a fuzzer timeout means *incomplete*;
+   neither is a refutation. This is the same lesson the go-test runners
+   learned from `t.Skip` exiting 0, applied at the contract boundary.
+3. **Subject identity is head SHA plus input digest, both required.** A
+   mismatch rejects the whole document as stale, disclosed. Known
+   boundary, stated: this names the committed tree and the changed-file
+   overlay, not the dependency closure — a full source-snapshot digest is
+   a later field.
+4. **Selective reporting is mitigated, not solved.** A profile can be
+   `required`: a required supplier with no admitted document blocks the
+   gate. Rejected rows are listed with identity and reason, never reduced
+   to a count — a rejected counterexample naming an unknown claim can
+   expose claim drift and must stay visible. The full manifest protocol
+   (correctful hands the supplier a probe manifest; the supplier returns
+   one outcome per entry) is deferred and named.
+5. **A claim-id match is not a binding.** Rows for ambiguously anchored
+   claims are rejected; every admitted row carries `binding:
+   supplier-attested` — the receipt's statement that the tie is the
+   supplier's word. Claim fingerprints are deferred.
+
+Mechanics that follow the same discipline: probe ids are NAMESPACED BY
+CONSTRUCTION (`ext:<supplier>/…` — a blacklist of built-in prefixes would
+be enumeration, and enumeration is how extractors go class-incomplete);
+strict JSON decoding rejects unknown fields; documents and config must be
+regular files OUTSIDE the repository tree, symlinks rejected — evidence
+the reviewed change can write is not evidence; every external string is
+control-stripped and bounded, and details pass the same sanitization
+chokepoint as in-tree evidence; the receipt's intake records carry the
+admitted document's SHA-256 as the audit pin. Policy floors may reference
+supplier mechanisms, so the policy mechanism vocabulary opened from an
+enum to a token shape — a typo now fails closed as an unsatisfiable floor
+instead of loudly at load, and the miss row shows the gap.
+
+Residual trust, stated plainly: admission authenticates possession of the
+invoker's config, not origin, and a trusted supplier can still lie, omit
+work, or bind the wrong property. The `[external: … — supplier-attested]`
+marker on every acting row is the receipt refusing to launder that trust
+into the appearance of an in-tree run. The signature channel (binding a
+document to a runner identity) is the planned stronger leg.
+
+Measured (first live runs, on this repository's own change): an admitted
+document verified a real claim at T4 with the external marker, disclosed
+an unbound counterexample among its rejections, and left the gate green;
+flipping the row to a counterexample refuted the claim, marked the
+refutation external, and blocked; deleting the required document blocked
+with "not admitted — REQUIRED" on the intake line. All three gate legs
+behaved to specification on the first run.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its

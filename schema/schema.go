@@ -198,6 +198,10 @@ type Evidence struct {
 	// Environment records the toolchain the probe ran under, when the runner
 	// measures it (e.g. "go1.24.5 linux/amd64"). Empty means unmeasured.
 	Environment string `json:"environment,omitempty"`
+	// Supplier names the external tool that supplied this evidence through
+	// the intake contract — empty for evidence correctful executed itself.
+	// Supplied evidence always carries Binding "supplier-attested".
+	Supplier string `json:"supplier,omitempty"`
 }
 
 // Mechanism values — one per runner kind.
@@ -234,6 +238,12 @@ const (
 	// never reached the claim's file — the proposed edge is refuted as an
 	// edge (which says nothing about the claim itself).
 	BindingFileNotReached = "file-not-reached"
+	// BindingSupplierAttested: the evidence was SUPPLIED by an external
+	// tool through the intake contract — correctful admitted it against an
+	// invoker-owned profile and a subject match, but did not execute the
+	// probe and cannot check the tie beyond the claim id. The residual
+	// trust is the supplier's word, and the receipt says so.
+	BindingSupplierAttested = "supplier-attested"
 )
 
 // Verified reports whether this evidence raises its claim: the probe ran,
@@ -402,12 +412,35 @@ type Receipt struct {
 	// when the repo declares a policy file. Nil means no policy: nothing was
 	// required, so nothing was missed.
 	Policy *PolicyResult `json:"policy,omitempty"`
+	// Intake is the external-evidence audit trail, one record per supplier
+	// profile — present only when the invoker configured intake.
+	Intake []IntakeRecord `json:"intake,omitempty"`
 	// Remainder is the subset of Results with Status == StatusUnverified,
 	// surfaced explicitly so a reader never has to derive it. This is the
 	// feature no other tool in the field ships.
 	Remainder []ClaimResult `json:"remainder"`
 	Coverage  Coverage      `json:"coverage"`
 	Summary   Summary       `json:"summary"`
+}
+
+// GateBlocked reports whether the merge gate blocks on this receipt: a
+// refuted claim, a policy miss, or a required supplier with no admitted
+// document. The remainder never blocks — it informs. This is THE gate
+// definition; main and any CI wrapper must consult it rather than
+// re-deriving the legs.
+func (r Receipt) GateBlocked() bool {
+	if r.Summary.Refuted > 0 {
+		return true
+	}
+	if r.Policy != nil && len(r.Policy.Misses) > 0 {
+		return true
+	}
+	for _, rec := range r.Intake {
+		if rec.Required && !rec.Admitted {
+			return true
+		}
+	}
+	return false
 }
 
 // PolicyResult records how the repository's declared evidence floors held
@@ -440,5 +473,43 @@ type PolicyMiss struct {
 	Detail string `json:"detail"`
 }
 
+// IntakeRecord is the audit trail for ONE external supplier's intake: what
+// was admitted, what was rejected, and why. One record per profile in the
+// intake config, present even when the supplier delivered nothing — a
+// required supplier with no admitted document is a gate miss, and silence
+// about it would be exactly the omission the receipt exists to prevent.
+type IntakeRecord struct {
+	// Supplier is the profile's name (invoker-owned, never row-claimed).
+	Supplier string `json:"supplier"`
+	// Mechanism and MaxTier echo the profile: the authority the invoker
+	// granted, which every admitted row is clamped to.
+	Mechanism string `json:"mechanism"`
+	MaxTier   Tier   `json:"max_tier"`
+	// Required means the gate blocks when no document was admitted.
+	Required bool `json:"required,omitempty"`
+	// Admitted reports whether a document passed admission (subject match).
+	Admitted bool `json:"admitted"`
+	// Reason states why nothing was admitted (missing file, subject
+	// mismatch, …). Empty when admitted.
+	Reason string `json:"reason,omitempty"`
+	// DocDigest is the SHA-256 (hex) over the admitted document's exact
+	// bytes — the audit pin for what was accepted.
+	DocDigest string `json:"doc_digest,omitempty"`
+	// Accepted counts the rows that became evidence.
+	Accepted int `json:"accepted"`
+	// Rejected lists per-row rejections with reasons — never reduced to a
+	// bare count: a rejected counterexample naming an unknown claim can
+	// expose claim drift, and a reader must be able to see it.
+	Rejected []IntakeRejection `json:"rejected,omitempty"`
+}
+
+// IntakeRejection is one intake row that did not become evidence.
+type IntakeRejection struct {
+	ClaimID string `json:"claim_id"`
+	ProbeID string `json:"probe_id"`
+	Outcome string `json:"outcome"`
+	Reason  string `json:"reason"`
+}
+
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.11"
+const SchemaVersion = "0.0.12"

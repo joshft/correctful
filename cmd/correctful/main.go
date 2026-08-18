@@ -17,9 +17,10 @@
 //	-concurrency  max probes to run at once. Default: 4.
 //	-timeout      overall probe budget. Default: 5m.
 //
-// Exit status: 0 when no claim was refuted and every declared policy floor was
-// met; 1 on a refutation or a policy miss (merge-gate semantics). The
-// remainder never fails the run — it is an honest report, not a defect.
+// Exit status: 0 when the gate passes; 1 on a refutation, a policy miss, or a
+// required intake supplier with no admitted document (merge-gate semantics —
+// schema.Receipt.GateBlocked is the definition). The remainder never fails
+// the run — it is an honest report, not a defect.
 package main
 
 import (
@@ -31,10 +32,12 @@ import (
 
 	"github.com/joshft/correctful/internal/gitdiff"
 	"github.com/joshft/correctful/internal/harvest"
+	"github.com/joshft/correctful/internal/intake"
 	"github.com/joshft/correctful/internal/llmextract"
 	"github.com/joshft/correctful/internal/policy"
 	"github.com/joshft/correctful/internal/probe"
 	"github.com/joshft/correctful/internal/receipt"
+	"github.com/joshft/correctful/schema"
 )
 
 func main() {
@@ -45,18 +48,19 @@ func main() {
 	concurrency := flag.Int("concurrency", 4, "max probes to run at once")
 	timeout := flag.Duration("timeout", 5*time.Minute, "overall probe budget")
 	useLLM := flag.Bool("llm", false, "additionally PROPOSE claims from the diff with an LLM (needs ANTHROPIC_API_KEY; proposals are unverified and land in the remainder)")
+	intakePath := flag.String("intake", "", "invoker-owned intake config admitting evidence from EXTERNAL suppliers (must live outside the repo tree; see README)")
 	flag.Parse()
 
 	if *asJSON {
 		*format = "json"
 	}
-	if err := run(*base, *repo, *format, *concurrency, *timeout, *useLLM); err != nil {
+	if err := run(*base, *repo, *format, *concurrency, *timeout, *useLLM, *intakePath); err != nil {
 		fmt.Fprintln(os.Stderr, "correctful:", err)
 		os.Exit(2)
 	}
 }
 
-func run(base, repo, format string, concurrency int, timeout time.Duration, useLLM bool) error {
+func run(base, repo, format string, concurrency int, timeout time.Duration, useLLM bool, intakePath string) error {
 	switch format {
 	case "text", "json", "md":
 	default:
@@ -102,6 +106,15 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 	if err != nil {
 		return err
 	}
+	// Intake config loads with the policy: authority grants fail loudly
+	// before any probe runs.
+	var intakeCfg *intake.Config
+	if intakePath != "" {
+		intakeCfg, err = intake.LoadConfig(intakePath, root)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Harvest claims, then dispatch probes against them.
 	harvesters := harvest.Default()
@@ -138,7 +151,25 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 	evidence := probe.NewDispatcher(concurrency, probe.Default()...).
 		Dispatch(ctx, root, claims)
 
+	// Admit external evidence AFTER the in-tree probes: supplied rows join
+	// each claim's evidence list and are weighed by the same rules.
+	var intakeRecords []schema.IntakeRecord
+	if intakeCfg != nil {
+		subj := intake.Subject{HeadSHA: change.HeadSHA, InputDigest: change.InputDigest}
+		extra, records, err := intake.Run(intakeCfg, root, subj, claims)
+		if err != nil {
+			return err
+		}
+		for i := range claims {
+			if rows := extra[claims[i].ID]; len(rows) > 0 {
+				evidence[i] = append(evidence[i], rows...)
+			}
+		}
+		intakeRecords = records
+	}
+
 	r := receipt.Assemble(change, claims, evidence, coverage)
+	r.Intake = intakeRecords
 	if pol != nil {
 		r.Policy = policy.Evaluate(pol, r)
 	}
@@ -154,7 +185,7 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 		receipt.WriteText(os.Stdout, r)
 	}
 
-	if r.Summary.Refuted > 0 || (r.Policy != nil && len(r.Policy.Misses) > 0) {
+	if r.GateBlocked() {
 		os.Exit(1)
 	}
 	return nil
