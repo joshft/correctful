@@ -313,6 +313,20 @@ func TestRFC8032Vector(t *testing.T) {
 	}
 }
 
+// TestSignRejectsC1Audience: the "control-free" audience rule must cover
+// the C1 range (0x80–0x9F), not only ASCII — an ASCII-only check admitted
+// U+0085 (next line), making the documented guarantee false.
+func TestSignRejectsC1Audience(t *testing.T) {
+	_, priv := testKey(t)
+	c1 := "github.com/org/\u0085repo" // U+0085, a C1 control
+	if _, err := Sign(fixtureReceipt(t), priv, c1); err == nil {
+		t.Fatalf("C1 control in audience accepted")
+	}
+	if _, err := Sign(fixtureReceipt(t), priv, "github.com/org/repo"); err != nil {
+		t.Fatalf("plain ASCII audience rejected: %v", err)
+	}
+}
+
 func b64(raw []byte) string {
 	return base64.StdEncoding.EncodeToString(raw)
 }

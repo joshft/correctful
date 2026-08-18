@@ -445,8 +445,10 @@ func (r Receipt) GateBlocked() bool {
 		// whose every row was rejected — or an empty one — satisfies
 		// nothing (demonstrated adversarially; the manifest protocol is
 		// the full fix and stays deferred, but zero accepted rows must
-		// not read as a delivered requirement).
-		if rec.Required && (!rec.Admitted || rec.Accepted == 0) {
+		// not read as a delivered requirement). The bound is Accepted < 1
+		// (not == 0), so a hand-forged negative count — which slipped the
+		// == 0 form — cannot read as delivered either.
+		if rec.Required && (!rec.Admitted || rec.Accepted < 1) {
 			return true
 		}
 	}

@@ -32,6 +32,7 @@ func TestStrictRejections(t *testing.T) {
 	}{
 		{"duplicate key", `{"a":"x","a":"y"}`, "duplicate key"},
 		{"duplicate key nested", `{"a":"x","b":[{"c":1,"c":2}]}`, "duplicate key"},
+		{"case-variant key collision", `{"a":"x","A":"y"}`, "case-variant key collision"},
 		{"unknown field", `{"a":"x","zz":1}`, "unknown field"},
 		{"trailing value", `{"a":"x"} true`, "trailing content"},
 		{"stray closing delimiter", `{"a":"x"}]`, "trailing content"},

@@ -17,14 +17,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"unicode/utf8"
 )
 
 // Decode parses data into v under the strict contract. The stdlib decoder
 // alone keeps a duplicate key's last value, matches struct fields
-// case-insensitively (accepted: canonical producers emit exact names, and
-// the signature layer separately requires byte-identical re-encoding), and
-// — the trailing-content gap — Decoder.More reports false at a stray
+// case-insensitively (so a case-variant sibling key silently overrides — see
+// rejectDupKeysIn, which rejects the collision), and — the trailing-content
+// gap — Decoder.More reports false at a stray
 // closing delimiter, so "{...}]" passes a More-based check. Decode demands
 // io.EOF from the token stream instead.
 func Decode(data []byte, v any) error {
@@ -62,17 +63,31 @@ func rejectDupKeysIn(dec *json.Decoder, t json.Token) error {
 	}
 	switch d {
 	case '{':
-		seen := map[string]bool{}
+		var seen []string
 		for dec.More() {
 			kt, err := dec.Token()
 			if err != nil {
 				return err
 			}
 			k, _ := kt.(string)
-			if seen[k] {
-				return fmt.Errorf("duplicate key %q", k)
+			// Exact duplicates are the obvious smuggle. Case-fold
+			// collisions are the subtle one: encoding/json matches a JSON
+			// key to a struct field case-INsensitively and lets a later
+			// key win, so {"outcome":"counterexample","Outcome":"verified"}
+			// decodes to "verified" while our exact-match check saw two
+			// distinct keys. Demonstrated live to turn an intake
+			// counterexample into a pass. Honest producers never emit two
+			// keys equal under case folding, so rejecting the collision
+			// costs nothing and closes the differential at the source.
+			for _, prev := range seen {
+				if prev == k {
+					return fmt.Errorf("duplicate key %q", k)
+				}
+				if strings.EqualFold(prev, k) {
+					return fmt.Errorf("case-variant key collision: %q and %q decode to one field", prev, k)
+				}
 			}
-			seen[k] = true
+			seen = append(seen, k)
 			vt, err := dec.Token()
 			if err != nil {
 				return err

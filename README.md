@@ -233,16 +233,20 @@ correctful sign -receipt receipt.json -key /ci/keys/correctful.key \
 
 # Step 3 — verify, in a protected workflow the change cannot edit.
 correctful verify -receipt receipt.signed.json -pub /ci/keys/correctful.pub \
-  -head "$GITHUB_SHA" -audience github.com/org/repo -gate
+  -head "$GITHUB_SHA" -base "$MERGE_BASE" -audience github.com/org/repo -gate
 ```
 
 The rules:
 
 - The main command has no signing flag. A process that runs reviewed test
   code must never hold the signing key.
-- `verify` needs the expected head SHA. A signature alone proves that SOME
-  receipt is authentic. The subject match ties it to THIS change. Pass
-  `-any-subject` only when you check an archived receipt.
+- A merge gate must pin the exact change, not just its head. One head
+  commit has many possible diffs — different bases, or a dirty working
+  tree — so `-gate` requires `-base` as well (CI knows the merge base).
+  For a mid-branch or dirty tree, add `-input-digest` for the strongest
+  pin. A signature alone proves that SOME receipt is authentic; the
+  subject match ties it to THIS change. Pass `-any-subject` to gate on
+  authenticity only (an archived receipt).
 - The trusted key comes from your `-pub` file, never from the receipt. The
   key inside the receipt is an identity claim, and `verify` requires it to
   match your pinned key.

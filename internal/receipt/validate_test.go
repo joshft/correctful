@@ -24,7 +24,10 @@ func consistentReceipt(t *testing.T) schema.Receipt {
 		Unread:       2,
 		UnreadPolicy: 1,
 	}
-	r := Assemble(gitdiff.Change{Repo: "repo", BaseRef: "main", HeadRef: "wip"}, claims, evidence, cov)
+	r := Assemble(gitdiff.Change{
+		Repo: "repo", BaseRef: "main", HeadRef: "wip",
+		Files: []string{"x.go", "y.go", "z.bin", ".ci/tool.cfg"},
+	}, claims, evidence, cov)
 	r.ToolVersion = "test"
 	return r
 }
@@ -62,6 +65,19 @@ func TestValidateConsistencyRejectsTampering(t *testing.T) {
 		{"intake accepted without admission", func(r *schema.Receipt) {
 			r.Intake = []schema.IntakeRecord{{Supplier: "s", MaxTier: schema.T3Property, Accepted: 2}}
 		}, "did not admit"},
+		{"evidence for a renamed claim", func(r *schema.Receipt) { r.Results[0].Claim.ID = "AUTH-999" }, "does not match its claim"},
+		{"out-of-range evidence tier", func(r *schema.Receipt) {
+			r.Results[0].Evidence[0].Tier = 99
+			r.Results[0].EffectiveTier = 99
+			r.Summary.TierCounts = map[string]int{"T?-invalid": 1, "T1-assertion": 1}
+		}, "outside T0..T4"},
+		{"coverage scope differs from change", func(r *schema.Receipt) { r.Change.Files = append(r.Change.Files, "phantom.go") }, "measured scope"},
+		{"negative intake accepted", func(r *schema.Receipt) {
+			r.Intake = []schema.IntakeRecord{{Supplier: "s", MaxTier: schema.T3Property, Required: true, Admitted: true, Accepted: -1}}
+		}, "out-of-range accepted"},
+		{"unsafe integer count", func(r *schema.Receipt) {
+			r.Policy = &schema.PolicyResult{Path: "correctful.json", Digest: strings.Repeat("a", 64), Rules: 1<<53 + 1}
+		}, "policy counts out of range"},
 	}
 	for _, c := range cases {
 		r := consistentReceipt(t)
@@ -87,7 +103,7 @@ func TestCanonicalGoldenVector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "f52a70f30f50c45bb5d51401e2d5866d34287600d8a5024aaf42a53976b43297"
+	const want = "eb91a86f71c3aaee3f50dcf7380eee0d6e0aa48975310951a76280d6642f41d3"
 	if got := hex.EncodeToString(sha256sum(b)); got != want {
 		t.Fatalf("canonical encoding drifted:\n got sha256 %s\nwant sha256 %s\nfirst 200 bytes:\n%s", got, want, b[:200])
 	}

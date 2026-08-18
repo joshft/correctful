@@ -23,6 +23,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/joshft/correctful/internal/receipt"
 	"github.com/joshft/correctful/internal/strictjson"
@@ -180,14 +182,19 @@ func preimage(audience string, payload []byte) []byte {
 	return out
 }
 
-// checkAudience keeps the preimage unambiguous: a NUL or control byte in
-// the audience could shift the boundary between audience and payload.
+// checkAudience keeps the preimage unambiguous and the "control-free"
+// documentation true: any control rune — ASCII C0, DEL, or the C1 range
+// (0x80–0x9F), which the ASCII-only check used to admit — is refused, so a
+// receipt cannot carry an audience with an invisible or line-breaking rune.
 func checkAudience(a string) error {
 	if len(a) > 200 {
 		return fmt.Errorf("audience exceeds 200 bytes")
 	}
+	if !utf8.ValidString(a) {
+		return fmt.Errorf("audience is not valid UTF-8")
+	}
 	for _, c := range a {
-		if c < 0x20 || c == 0x7f {
+		if unicode.IsControl(c) {
 			return fmt.Errorf("audience contains a control character")
 		}
 	}
@@ -215,7 +222,18 @@ func decodeB64(s string, wantLen int, what string) ([]byte, error) {
 	return raw, nil
 }
 
+// shortKey abbreviates a key for an error message. The value can come from
+// a hostile receipt (Sign's already-signed refusal, Verify's wrong-key
+// error both quote the embedded public_key), so control runes are stripped
+// before it reaches a terminal — an error string must not carry an escape
+// sequence.
 func shortKey(b64 string) string {
+	b64 = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, b64)
 	if len(b64) > 12 {
 		return b64[:12] + "…"
 	}

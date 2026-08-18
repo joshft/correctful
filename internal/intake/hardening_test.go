@@ -204,3 +204,25 @@ func TestRejectedRowsAreScrubbed(t *testing.T) {
 		t.Error("config digest absent — the authority file is unpinned")
 	}
 }
+
+// TestCaseVariantOutcomeKeyRejected: the CRITICAL live-path hole. An intake
+// row carrying both "outcome" and "Outcome" passed exact-match duplicate
+// detection, and Go's case-insensitive field matching then read the second
+// one — turning a counterexample into a pass and defeating refutation
+// dominance at the external boundary. The strict decoder now rejects the
+// case-fold collision, so the whole document fails loudly.
+func TestCaseVariantOutcomeKeyRejected(t *testing.T) {
+	repo := t.TempDir()
+	outside := t.TempDir()
+	rows := `{"claim_id": "INV-009", "probe_id": "p", "outcome": "counterexample", "Outcome": "verified"}`
+	docPath := write(t, outside, "doc.json", docFor("dafny-worker", "abc", goodDigest, rows))
+	cfgPath := write(t, outside, "cfg.json", configFor(docPath, false))
+	cfg, err := LoadConfig(cfgPath, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = Run(cfg, repo, Subject{HeadSHA: "abc", InputDigest: goodDigest}, testClaims())
+	if err == nil || !strings.Contains(err.Error(), "case-variant key collision") {
+		t.Errorf("case-variant outcome key tolerated: %v", err)
+	}
+}

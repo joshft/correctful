@@ -454,6 +454,7 @@ func WriteJSON(w io.Writer, r schema.Receipt) error {
 // its own section because it is the part a reader most needs to see and the part
 // every other tool hides.
 func WriteText(w io.Writer, r schema.Receipt) {
+	r = scrubForDisplay(r)
 	s := r.Summary
 	fmt.Fprintf(w, "correctful receipt (schema %s%s)\n", r.SchemaVersion, toolNote(r))
 	fmt.Fprintf(w, "change: %s...%s%s", r.Change.BaseRef, r.Change.HeadRef, shaNote(r.Change))
