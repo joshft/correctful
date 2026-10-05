@@ -50,14 +50,49 @@ type Expect struct {
 	HeadSHA     string
 	BaseSHA     string // optional extra pin
 	InputDigest string // optional extra pin
+	Runner      string // optional producer pin; cannot match a legacy receipt
+	Role        string // optional role pin; cannot match a legacy receipt
 	AnySubject  bool
 }
 
-// Sign validates the receipt's internal consistency, signs its canonical
+// Sign retains legacy schema signing. Current receipts require SignWithProducer.
+// It validates the receipt's internal consistency, signs its canonical
 // payload, and returns the receipt with the signature block set. It refuses
 // an already-signed receipt — re-signing must be an explicit decision made
 // on the unsigned artifact, never a silent overwrite.
 func Sign(r schema.Receipt, priv ed25519.PrivateKey, audience string) (schema.Receipt, error) {
+	if r.SchemaVersion != schema.LegacySchemaVersion {
+		return r, fmt.Errorf("current receipts require invoker-configured producer identity and role; use SignWithProducer")
+	}
+	return sign(r, priv, audience)
+}
+
+// SignWithProducer binds identity and role from the protected signer's invoker.
+// Never populate producer from the input artifact, repository config, environment
+// controlled by probes, or an intake document. Reject even matching declarations:
+// accepting them would let a caller accidentally promote producer-controlled data.
+func SignWithProducer(r schema.Receipt, priv ed25519.PrivateKey, audience string, producer schema.ReceiptProducer) (schema.Receipt, error) {
+	if r.SchemaVersion != schema.SchemaVersion {
+		return r, fmt.Errorf("producer binding requires current schema")
+	}
+	if r.Signature != nil {
+		return r, fmt.Errorf("receipt is already signed")
+	}
+	if r.Producer != nil {
+		return r, fmt.Errorf("input receipt must not select its producer identity or role")
+	}
+	if err := receipt.ValidateProducer(producer); err != nil {
+		return r, err
+	}
+	// Validate the stated outcome before binding it; never repair a false verdict.
+	if err := receipt.ValidateConsistency(r); err != nil {
+		return r, err
+	}
+	r.Producer = &producer
+	return sign(r, priv, audience)
+}
+
+func sign(r schema.Receipt, priv ed25519.PrivateKey, audience string) (schema.Receipt, error) {
 	if r.Signature != nil {
 		return r, fmt.Errorf("receipt is already signed (by key %s); sign the unsigned artifact", shortKey(r.Signature.PublicKey))
 	}
@@ -70,6 +105,9 @@ func Sign(r schema.Receipt, priv ed25519.PrivateKey, audience string) (schema.Re
 	payload, err := receipt.Canonical(r)
 	if err != nil {
 		return r, err
+	}
+	if len(priv) != ed25519.PrivateKeySize {
+		return r, fmt.Errorf("private key is not a usable ed25519 key")
 	}
 	pub, ok := priv.Public().(ed25519.PublicKey)
 	if !ok || len(priv) != ed25519.PrivateKeySize {
@@ -156,6 +194,12 @@ func Verify(artifact []byte, trusted ed25519.PublicKey, exp Expect) (schema.Rece
 		return r, fmt.Errorf("authenticated receipt is internally inconsistent: %w", err)
 	}
 
+	if exp.Runner != "" && (r.Producer == nil || r.Producer.Runner != exp.Runner) {
+		return r, fmt.Errorf("runner identity mismatch")
+	}
+	if exp.Role != "" && (r.Producer == nil || r.Producer.Role != exp.Role) {
+		return r, fmt.Errorf("receipt role mismatch")
+	}
 	if !exp.AnySubject {
 		if exp.HeadSHA == "" {
 			return r, fmt.Errorf("no expected head SHA: a signature authenticates SOME receipt — pass the change under review, or -any-subject to explicitly skip subject matching")

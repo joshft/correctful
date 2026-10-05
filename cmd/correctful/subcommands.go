@@ -50,6 +50,8 @@ func cmdSign(args []string) error {
 	keyPath := fs.String("key", "", "ed25519 private key (PKCS#8 PEM)")
 	audience := fs.String("audience", "", `stable repository identity to bind, e.g. "github.com/org/repo" (empty binds none — weaker, stated)`)
 	out := fs.String("out", "", "write the signed receipt here (default stdout)")
+	runner := fs.String("runner", "", "producer identity from protected invoker configuration")
+	role := fs.String("role", "", "invoker-selected receipt role: advisory, gate or completion")
 	fs.Parse(args)
 	if *in == "" || *keyPath == "" {
 		return fmt.Errorf("need -receipt and -key")
@@ -67,7 +69,15 @@ func cmdSign(args []string) error {
 	if err != nil {
 		return err
 	}
-	signed, err := signing.Sign(r, priv, *audience)
+	var signed schema.Receipt
+	if r.SchemaVersion == schema.LegacySchemaVersion {
+		if *runner != "" || *role != "" {
+			return fmt.Errorf("legacy receipts cannot bind runner or role")
+		}
+		signed, err = signing.Sign(r, priv, *audience)
+	} else {
+		signed, err = signing.SignWithProducer(r, priv, *audience, schema.ReceiptProducer{Runner: *runner, Role: *role})
+	}
 	if err != nil {
 		return err
 	}
@@ -91,6 +101,8 @@ func cmdVerify(args []string) error {
 	base := fs.String("base", "", "expected base SHA (optional extra pin)")
 	inputDigest := fs.String("input-digest", "", "expected input digest (optional extra pin)")
 	audience := fs.String("audience", "", "expected audience the signature must be bound to")
+	runner := fs.String("runner", "", "expected producer identity (requires current schema)")
+	role := fs.String("role", "", "expected receipt role (requires current schema)")
 	anySubject := fs.Bool("any-subject", false, "skip subject matching — authenticity only; states so in the output")
 	gate := fs.Bool("gate", false, "after verifying, also exit 1 when the receipt's gate blocks")
 	fs.Parse(args)
@@ -121,6 +133,7 @@ func cmdVerify(args []string) error {
 		BaseSHA:     *base,
 		InputDigest: *inputDigest,
 		AnySubject:  *anySubject,
+		Runner:      *runner, Role: *role,
 	})
 	if err != nil {
 		return err
@@ -135,13 +148,19 @@ func cmdVerify(args []string) error {
 	if a := r.Signature.Audience; a != "" {
 		fmt.Printf("audience: %q\n", a)
 	}
-	if r.GateBlocked() {
-		fmt.Println("gate: blocked")
+	if r.Producer != nil {
+		fmt.Printf("producer: %s; role: %s\n", r.Producer.Runner, r.Producer.Role)
+	}
+	verdict := r.Gate
+	if verdict == "" {
+		verdict = r.GateVerdict()
+		fmt.Println("legacy gate: computed locally; absent from signed payload")
+	}
+	fmt.Printf("gate: %s\n", verdict)
+	if verdict != "pass" {
 		if *gate {
 			os.Exit(1)
 		}
-	} else {
-		fmt.Println("gate: pass")
 	}
 	return nil
 }

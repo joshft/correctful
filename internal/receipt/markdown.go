@@ -25,6 +25,12 @@ func WriteMarkdown(w io.Writer, r schema.Receipt) {
 	s := r.Summary
 	fmt.Fprintln(w, MarkdownMarker)
 	fmt.Fprintf(w, "## correctful receipt\n\n")
+	if r.Producer != nil {
+		fmt.Fprintf(w, "Producer: `%s`; role: `%s` (declaration; verify signature and policy).\n\n", mdCell(r.Producer.Runner), mdCell(r.Producer.Role))
+	}
+	if r.Gate != "" {
+		fmt.Fprintf(w, "Recorded gate: `%s`.\n\n", mdCell(r.Gate))
+	}
 	fmt.Fprintf(w, "**%d claims** — ✅ %d verified · ❌ %d refuted · ⚠️ %d unverified\n\n",
 		s.TotalClaims, s.Verified, s.Refuted, s.Unverified)
 	if a := s.Anchoring; a != nil {

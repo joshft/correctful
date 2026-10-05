@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/joshft/correctful/schema"
 )
@@ -35,8 +36,8 @@ func inRange(n int) bool { return n >= 0 && n <= maxSafeInt }
 // documents are digest-pinned, not embedded, so their findings cannot be
 // recomputed here — pretending otherwise would be false assurance.
 func ValidateConsistency(r schema.Receipt) error {
-	if r.SchemaVersion != schema.SchemaVersion {
-		return fmt.Errorf("schema %q is not %q: this build validates only the schema it ships", r.SchemaVersion, schema.SchemaVersion)
+	if r.SchemaVersion != schema.SchemaVersion && r.SchemaVersion != schema.LegacySchemaVersion {
+		return fmt.Errorf("unsupported schema %q: this build validates %s and %s", r.SchemaVersion, schema.SchemaVersion, schema.LegacySchemaVersion)
 	}
 
 	// Every weighed field re-derives from the claim and its evidence rows.
@@ -138,6 +139,38 @@ func ValidateConsistency(r schema.Receipt) error {
 		if !inRange(a.SpecIDClaims) || !inRange(a.Resolved) || !inRange(a.Ambiguous) || !inRange(a.Orphan) {
 			return fmt.Errorf("anchoring counts out of range")
 		}
+	}
+	if r.SchemaVersion == schema.LegacySchemaVersion {
+		if r.Producer != nil || r.Gate != "" {
+			return fmt.Errorf("legacy schema cannot claim producer or gate fields")
+		}
+	} else {
+		if r.Gate != r.GateVerdict() {
+			return fmt.Errorf("gate verdict does not match receipt outcome")
+		}
+		if r.Producer != nil {
+			if err := ValidateProducer(*r.Producer); err != nil {
+				return err
+			}
+		} else if r.Signature != nil {
+			return fmt.Errorf("signed current receipt requires producer identity and role")
+		}
+	}
+	return nil
+}
+
+// ValidateProducer restricts public identities to opaque tokens, not locations.
+func ValidateProducer(p schema.ReceiptProducer) error {
+	if len(p.Runner) == 0 || len(p.Runner) > 64 || strings.TrimSpace(p.Runner) != p.Runner {
+		return fmt.Errorf("runner must be a nonempty token of at most 64 bytes")
+	}
+	for _, c := range p.Runner {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return fmt.Errorf("runner must contain only letters, digits, hyphens or underscores")
+		}
+	}
+	if p.Role != "advisory" && p.Role != "gate" && p.Role != "completion" {
+		return fmt.Errorf("role must be advisory, gate or completion")
 	}
 	return nil
 }

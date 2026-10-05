@@ -229,10 +229,12 @@ correctful -base main -format json > receipt.json
 # Step 2 — sign. This step runs no probes and reads no repository tree.
 # Only this step mounts the key.
 correctful sign -receipt receipt.json -key /ci/keys/correctful.key \
+  -runner ci-runner -role gate \
   -audience github.com/org/repo -out receipt.signed.json
 
 # Step 3 — verify, in a protected workflow the change cannot edit.
 correctful verify -receipt receipt.signed.json -pub /ci/keys/correctful.pub \
+  -runner ci-runner -role gate \
   -head "$GITHUB_SHA" -base "$MERGE_BASE" -audience github.com/org/repo -gate
 ```
 
@@ -260,6 +262,39 @@ The rules:
 - `correctful render -receipt receipt.signed.json -format md` renders the
   signed JSON for a PR comment without a second probe run. The rendering
   itself is not signed, and it says so.
+
+Schema **0.0.15** adds these fields inside the signed payload:
+
+```json
+{
+  "producer": {"runner": "ci-runner", "role": "gate"},
+  "gate": "blocked"
+}
+```
+
+- The protected signer sets `producer` from explicit `-runner` and `-role`
+  arguments. Roles are `advisory`, `gate`, and `completion`. Runner identities
+  are opaque tokens, not machine names or locations.
+- The signer rejects an input receipt that already contains `producer`.
+  No repository policy, model response or intake document sets these fields.
+  The probe command has no runner or role flags. Unsigned output omits producer.
+- Correctful computes `gate` after policy and intake evaluation. Its values are
+  `refuted`, `blocked`, and `pass`. Refutation dominates. Policy misses and
+  missing usable required intake block. The remainder does not block.
+- Verification checks the signed verdict against the receipt's evidence and
+  gate rules. Renderers display the recorded verdict without deriving another.
+- A protected verifier pins `-runner` and `-role` as well as key, audience and
+  subject. A declared gate role does not mean the gate passes or the signer
+  deserves trust. A completion receipt cannot satisfy a gate-role pin.
+- Schema **0.0.14** remains verifiable with its original canonical bytes and
+  signature domain. It has no producer or serialized gate. It cannot satisfy
+  runner or role pins. Legacy verification labels its locally computed gate.
+  Legacy signing remains available without runner or role arguments.
+
+Keep the signer binary, invocation, input channel and arguments outside the
+reviewed change's control. Do not derive arguments from receipt text or repository
+configuration. The signer runs no reviewed code. Its declaration vouches for the
+configured producer; it cannot prove the producer's honesty or deployment isolation.
 
 What the signature does NOT prove: that the runner was honest, that the
 key was never stolen, or that this receipt is the newest run for its

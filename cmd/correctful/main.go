@@ -201,6 +201,8 @@ func run(base, repo, format string, concurrency int, timeout time.Duration, useL
 		r.Policy = policy.Evaluate(pol, r)
 	}
 
+	r.Gate = r.GateVerdict()
+
 	switch format {
 	case "json":
 		if err := receipt.WriteJSON(os.Stdout, r); err != nil {
