@@ -421,11 +421,37 @@ type Receipt struct {
 	Remainder []ClaimResult `json:"remainder"`
 	Coverage  Coverage      `json:"coverage"`
 	Summary   Summary       `json:"summary"`
+	// Producer is set only by the separate signer from invoker configuration.
+	// Nil on unsigned receipts and on legacy schema receipts.
+	Producer *ReceiptProducer `json:"producer,omitempty"`
+	// Gate is the computed verdict, serialized for consumers since 0.0.15.
+	// Omission preserves the exact canonical bytes of schema 0.0.14.
+	Gate string `json:"gate,omitempty"`
 	// Signature authenticates the receipt when present — set only by the
 	// sign subcommand, which runs no probes and reads no tree, so the
 	// reviewed change can never reach the signing key. Nil means unsigned:
 	// the receipt is a report whose authenticity rests on transport alone.
 	Signature *SignatureBlock `json:"signature,omitempty"`
+}
+
+// ReceiptProducer identifies the producer and purpose vouched for by the signer.
+// A declaration is not a trust root: consumers must pin the signing key and
+// expected runner, role and subject in their own protected policy.
+type ReceiptProducer struct {
+	Runner string `json:"runner"`
+	Role   string `json:"role"`
+}
+
+// GateVerdict computes the serialized verdict. Refutation dominates other
+// blockers. Remainder and unread coverage remain disclosures, never a pass proof.
+func (r Receipt) GateVerdict() string {
+	if r.Summary.Refuted > 0 {
+		return "refuted"
+	}
+	if r.GateBlocked() {
+		return "blocked"
+	}
+	return "pass"
 }
 
 // GateBlocked reports whether the merge gate blocks on this receipt: a
@@ -559,4 +585,7 @@ type SignatureBlock struct {
 }
 
 // SchemaVersion is the current version of the receipt schema (the payload).
-const SchemaVersion = "0.0.14"
+const SchemaVersion = "0.0.15"
+
+// LegacySchemaVersion retains the original signed payload without producer or gate.
+const LegacySchemaVersion = "0.0.14"

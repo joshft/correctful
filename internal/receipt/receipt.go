@@ -58,7 +58,7 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 		}
 	}
 
-	return schema.Receipt{
+	r := schema.Receipt{
 		SchemaVersion: schema.SchemaVersion,
 		ToolVersion:   toolVersion(),
 		Change: schema.ChangeRef{
@@ -86,6 +86,8 @@ func Assemble(change gitdiff.Change, claims []schema.Claim, evidence [][]schema.
 			Anchoring:   anchoringSummary(claims),
 		},
 	}
+	r.Gate = r.GateVerdict()
+	return r
 }
 
 // toolVersion identifies this checker build from its own build info — the
@@ -457,6 +459,12 @@ func WriteText(w io.Writer, r schema.Receipt) {
 	r = scrubForDisplay(r)
 	s := r.Summary
 	fmt.Fprintf(w, "correctful receipt (schema %s%s)\n", r.SchemaVersion, toolNote(r))
+	if r.Producer != nil {
+		fmt.Fprintf(w, "producer: %s; role: %s (declaration; verify signature and policy)\n", r.Producer.Runner, r.Producer.Role)
+	}
+	if r.Gate != "" {
+		fmt.Fprintf(w, "recorded gate: %s\n", r.Gate)
+	}
 	fmt.Fprintf(w, "change: %s...%s%s", r.Change.BaseRef, r.Change.HeadRef, shaNote(r.Change))
 	if r.Change.Repo != "" {
 		fmt.Fprintf(w, "  [%s]", r.Change.Repo)

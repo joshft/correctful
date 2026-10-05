@@ -47,6 +47,8 @@ func fixtureReceipt(t *testing.T) schema.Receipt {
 	}
 	r := receipt.Assemble(change, claims, evidence, cov)
 	r.ToolVersion = "test"
+	r.SchemaVersion = schema.LegacySchemaVersion
+	r.Gate = ""
 	return r
 }
 

@@ -692,6 +692,40 @@ bearing companion to the signature, and it must re-derive and range-check
 every field a reader or a gate trusts — not just the summary arithmetic
 the first pass covered.
 
+## Signed producer and gate (schema 0.0.15)
+
+A consumer that gates on a receipt must be able to verify which runner produced
+it, which role it serves, and what it decided, from the signed bytes alone.
+Schema 0.0.15 adds `producer.runner`, `producer.role`, and `gate` to that payload.
+The existing canonical encoding and signature domain remain unchanged. The schema
+version itself is signed, so moving fields between schema versions invalidates
+an existing signature.
+
+Producer identity and role are grants from the protected invoker, not data from
+the evaluated change. Only the separate sign command accepts their arguments.
+The signing API for current receipts requires an explicit producer configuration.
+It rejects producer fields already present in the unsigned input, even when they
+match the configured values. The legacy signing API refuses current receipts.
+Repository policy, intake profiles and supplier documents have no producer grant.
+The operator must protect the signing binary and invocation, avoid arguments
+constructed from untrusted input, and authenticate the producer's artifact channel.
+A signature authenticates the signer's declaration; it does not measure isolation.
+
+The gate verdict follows the existing gate model: `refuted` takes precedence,
+then `blocked` for a policy miss or unusable required intake, otherwise `pass`.
+The assembler computes a verdict, and the CLI refreshes it after policy and
+intake evaluation. Signing and verification require exact consistency. They never
+repair a false verdict. Renderers display its stored value. Remainder, evidence
+tiers and coverage retain their existing meaning and visibility.
+
+Schema 0.0.14 omits both new fields and preserves its exact canonical bytes.
+The original signature golden vector remains unchanged. Verification accepts
+that schema but rejects new-field claims in it. Runner or role expectations
+cannot match a legacy receipt. An old receipt can still be authenticated without
+those expectations; it cannot silently acquire a producer identity or role.
+Freshness, protected workflow enforcement and signer integrity remain deployment
+responsibilities. A signed role alone does not confer gate authority.
+
 ## Known limitations (found by dogfooding, stated honestly)
 
 correctful was run on itself and on a real 101-file production change on its

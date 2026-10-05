@@ -75,6 +75,13 @@ func scrubForDisplay(r schema.Receipt) schema.Receipt {
 		b.Sig = clean(b.Sig)
 		r.Signature = &b
 	}
+	if r.Producer != nil {
+		p := *r.Producer
+		p.Runner = clean(p.Runner)
+		p.Role = clean(p.Role)
+		r.Producer = &p
+	}
+	r.Gate = clean(r.Gate)
 	r.ToolVersion = clean(r.ToolVersion)
 	r.SchemaVersion = clean(r.SchemaVersion)
 	return r

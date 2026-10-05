@@ -99,7 +99,10 @@ func TestValidateConsistencyRejectsTampering(t *testing.T) {
 // over — stop. On a deliberate schema change, re-pin and say so in the
 // commit message.
 func TestCanonicalGoldenVector(t *testing.T) {
-	b, err := Canonical(consistentReceipt(t))
+	r := consistentReceipt(t)
+	r.SchemaVersion = schema.LegacySchemaVersion
+	r.Gate = ""
+	b, err := Canonical(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +113,7 @@ func TestCanonicalGoldenVector(t *testing.T) {
 	// WriteJSON must emit exactly the canonical bytes — one encoder, one
 	// byte-form.
 	var sb strings.Builder
-	if err := WriteJSON(&sb, consistentReceipt(t)); err != nil {
+	if err := WriteJSON(&sb, r); err != nil {
 		t.Fatal(err)
 	}
 	if sb.String() != string(b) {
